@@ -16,6 +16,13 @@ type Exercise = { id: string; name: string; muscle: MuscleGroup };
 type WorkoutTemplate = { id: string; name: string; exercises: Exercise[] };
 type LiveSet = { id: string; weight: string; reps: string; done: boolean };
 type BodyMetricsEntry = { date: string; weight: number; bodyFat: number };
+type ExerciseHistoryEntry = {
+  key: string;
+  name: string;
+  muscle: MuscleGroup;
+  date: string;
+  sets: Array<{ weight: number; reps: number }>;
+};
 type WorkoutSession = {
   id: string;
   date: string;
@@ -33,6 +40,7 @@ type LiveWorkout = {
 const STORAGE_KEY = 'lift-log-mvp';
 const LIVE_SESSION_KEY = 'lift-log-live-session';
 const METRICS_KEY = 'lift-log-body-metrics';
+const EXERCISE_HISTORY_KEY = 'lift-log-exercise-history';
 const BASE_URL = import.meta.env.BASE_URL;
 const MUSCLES: Exclude<MuscleGroup, 'other'>[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'forearms', 'abs', 'quads', 'glutes', 'calves'];
 const DEFAULT_SET_COUNT = 3;
@@ -100,6 +108,19 @@ function saveMetrics(entries: BodyMetricsEntry[]) {
   localStorage.setItem(METRICS_KEY, JSON.stringify(entries));
 }
 
+function readExerciseHistory(): ExerciseHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(EXERCISE_HISTORY_KEY);
+    return raw ? (JSON.parse(raw) as ExerciseHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveExerciseHistory(entries: ExerciseHistoryEntry[]) {
+  localStorage.setItem(EXERCISE_HISTORY_KEY, JSON.stringify(entries));
+}
+
 function sessionVolume(session: WorkoutSession | LiveWorkout) {
   return session.exercises.reduce((total, exercise) => {
     return (
@@ -121,10 +142,25 @@ function sessionMuscleVolume(session: WorkoutSession | LiveWorkout) {
   }, {} as Record<MuscleGroup, number>);
 }
 
-function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[] } {
+function normalizeExerciseKey(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function historyKeyForExercise(name: string, muscle: MuscleGroup) {
+  return `${normalizeExerciseKey(name)}::${muscle}`;
+}
+
+function exerciseSummaryFromSets(sets: Array<{ weight: number; reps: number }>) {
+  if (!sets.length) return null;
+  const last = sets[sets.length - 1];
+  return { weight: last.weight, reps: last.reps, setCount: sets.length };
+}
+
+function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[]; exerciseHistory: ExerciseHistoryEntry[] } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { templates: defaultTemplates, sessions: [] };
+    const exerciseHistory = readExerciseHistory();
+    if (!raw) return { templates: defaultTemplates, sessions: [], exerciseHistory };
     const parsed = JSON.parse(raw);
     return {
       templates: Array.isArray(parsed.templates) && parsed.templates.length
@@ -141,10 +177,17 @@ function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[]
               muscle: normalizeMuscle(exercise.muscle)
             }))
           }))
+        : [],
+      exerciseHistory: exerciseHistory.length
+        ? exerciseHistory.map((entry) => ({
+            ...entry,
+            muscle: normalizeMuscle(entry.muscle),
+            key: historyKeyForExercise(entry.name, normalizeMuscle(entry.muscle))
+          }))
         : []
     };
   } catch {
-    return { templates: defaultTemplates, sessions: [] };
+    return { templates: defaultTemplates, sessions: [], exerciseHistory: [] };
   }
 }
 
@@ -161,32 +204,51 @@ function formatDate(date: string) {
   return new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function lastSessionForExercise(exerciseName: string, sessions: WorkoutSession[]) {
-  const found = [...sessions].reverse().find((session) => session.exercises.some((ex) => ex.name === exerciseName));
-  const exercise = found?.exercises.find((ex) => ex.name === exerciseName);
-  const lastSet = exercise && exercise.sets.length ? exercise.sets[exercise.sets.length - 1] : null;
-  return lastSet ? `${lastSet.weight} x ${lastSet.reps}` : '';
+function getLastExerciseSets(exerciseName: string, muscle: MuscleGroup, history: ExerciseHistoryEntry[]) {
+  const target = historyKeyForExercise(exerciseName, muscle);
+  const byName = [...history].reverse().find((entry) => entry.key === target);
+  if (byName) return byName.sets;
+
+  const byExerciseName = [...history].reverse().find((entry) => normalizeExerciseKey(entry.name) === normalizeExerciseKey(exerciseName));
+  if (byExerciseName) return byExerciseName.sets;
+
+  const byMuscle = [...history].reverse().find((entry) => entry.muscle === muscle);
+  return byMuscle?.sets ?? [];
 }
 
-function createWorkoutSession(template: WorkoutTemplate, sessions: WorkoutSession[]): LiveWorkout {
+function getLastExerciseSetCount(exerciseName: string, muscle: MuscleGroup, history: ExerciseHistoryEntry[]) {
+  const lastSets = getLastExerciseSets(exerciseName, muscle, history);
+  return lastSets.length || DEFAULT_SET_COUNT;
+}
+
+function getPreviousExerciseSummary(exerciseName: string, muscle: MuscleGroup, history: ExerciseHistoryEntry[]) {
+  const lastSets = getLastExerciseSets(exerciseName, muscle, history);
+  if (!lastSets.length) return '';
+  const last = lastSets[lastSets.length - 1];
+  return `Previous: ${last.weight} x ${last.reps} · ${lastSets.length} sets`;
+}
+
+function createWorkoutSession(template: WorkoutTemplate, history: ExerciseHistoryEntry[]): LiveWorkout {
   return {
     id: uid(),
     templateId: template.id,
     templateName: template.name,
     exercises: template.exercises.map((exercise) => {
-      const last = [...sessions].reverse().find((session) => session.exercises.some((x) => x.name === exercise.name));
-      const lastEx = last?.exercises.find((x) => x.name === exercise.name);
-      const prev = lastEx && lastEx.sets.length ? lastEx.sets[lastEx.sets.length - 1] : null;
+      const lastSets = getLastExerciseSets(exercise.name, exercise.muscle, history);
+      const setCount = getLastExerciseSetCount(exercise.name, exercise.muscle, history);
       return {
         id: exercise.id,
         name: exercise.name,
         muscle: exercise.muscle,
-        sets: Array.from({ length: DEFAULT_SET_COUNT }, () => ({
-          id: uid(),
-          weight: String(prev?.weight ?? ''),
-          reps: String(prev?.reps ?? ''),
-          done: false
-        }))
+        sets: Array.from({ length: setCount }, (_, index) => {
+          const prev = lastSets[index] ?? lastSets[lastSets.length - 1] ?? null;
+          return {
+            id: uid(),
+            weight: String(prev?.weight ?? ''),
+            reps: String(prev?.reps ?? ''),
+            done: false
+          };
+        })
       };
     })
   };
@@ -197,6 +259,7 @@ export default function App() {
   const [screen, setScreen] = useState<'dashboard' | 'create' | 'live' | 'stats'>('dashboard');
   const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup>('quads');
   const [draft, setDraft] = useState<WorkoutTemplate>(blankWorkout);
+  const [existingExerciseName, setExistingExerciseName] = useState('');
   const [activeSession, setActiveSession] = useState<LiveWorkout | null>(() => readLiveSession());
   const [metrics, setMetrics] = useState<BodyMetricsEntry[]>(() => readMetrics());
   const [metricDraft, setMetricDraft] = useState({ weight: '', bodyFat: '' });
@@ -207,6 +270,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    saveExerciseHistory(state.exerciseHistory);
+  }, [state.exerciseHistory, state.templates]);
 
   useEffect(() => {
     if (activeSession) localStorage.setItem(LIVE_SESSION_KEY, JSON.stringify(activeSession));
@@ -295,6 +362,28 @@ export default function App() {
     return { current, previous };
   }, [muscleProgression]);
 
+  const exerciseLibrary = useMemo(() => {
+    const library = new Map<string, ExerciseHistoryEntry>();
+    for (const entry of state.exerciseHistory) {
+      if (!library.has(entry.key)) library.set(entry.key, entry);
+    }
+    for (const template of state.templates) {
+      for (const exercise of template.exercises) {
+        const key = historyKeyForExercise(exercise.name, exercise.muscle);
+        if (!library.has(key)) {
+          library.set(key, {
+            key,
+            name: exercise.name,
+            muscle: exercise.muscle,
+            date: '',
+            sets: []
+          });
+        }
+      }
+    }
+    return [...library.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [state.exerciseHistory]);
+
   const saveDraftExercise = (index: number, patch: Partial<Exercise>) => {
     setDraft((current) => {
       const exercises = current.exercises.slice();
@@ -310,6 +399,23 @@ export default function App() {
     }));
   };
 
+  const removeDraftExercise = (index: number) => {
+    setDraft((current) => {
+      if (current.exercises.length <= 1) return current;
+      return { ...current, exercises: current.exercises.filter((_, exerciseIndex) => exerciseIndex !== index) };
+    });
+  };
+
+  const addExistingExercise = () => {
+    const selected = exerciseLibrary.find((entry) => entry.key === existingExerciseName);
+    if (!selected) return;
+    setDraft((current) => ({
+      ...current,
+      exercises: [...current.exercises, { id: uid(), name: selected.name, muscle: selected.muscle }]
+    }));
+    setExistingExerciseName('');
+  };
+
   const saveBodyMetrics = () => {
     const weight = Number(metricDraft.weight);
     const bodyFat = Number(metricDraft.bodyFat);
@@ -322,6 +428,7 @@ export default function App() {
     if (!draft.name.trim() || !draft.exercises.some((exercise) => exercise.name.trim())) return;
     setState((current) => ({ ...current, templates: [structuredClone(draft), ...current.templates] }));
     setDraft(blankWorkout());
+    setExistingExerciseName('');
     setScreen('dashboard');
   };
 
@@ -400,9 +507,10 @@ export default function App() {
 
   const finishWorkout = () => {
     if (!activeSession) return;
+    const finishedAt = new Date().toISOString();
     const finished: WorkoutSession = {
       id: activeSession.id,
-      date: new Date().toISOString(),
+      date: finishedAt,
       templateId: activeSession.templateId,
       templateName: activeSession.templateName,
       exercises: activeSession.exercises.map((exercise) => ({
@@ -415,7 +523,24 @@ export default function App() {
       }))
     };
 
-    setState((current) => ({ ...current, sessions: [finished, ...current.sessions].slice(0, 100) }));
+    const historyUpdates = activeSession.exercises
+      .filter((exercise) => exercise.sets.some((set) => set.weight !== '' || set.reps !== ''))
+      .map((exercise) => ({
+        key: historyKeyForExercise(exercise.name, exercise.muscle),
+        name: exercise.name,
+        muscle: exercise.muscle,
+        date: finishedAt,
+        sets: exercise.sets
+          .filter((set) => set.weight !== '' || set.reps !== '')
+          .map((set) => ({ weight: Number(set.weight), reps: Number(set.reps) }))
+      }));
+
+    setState((current) => {
+      const dedupedHistory = [...historyUpdates, ...current.exerciseHistory].filter(
+        (entry, index, all) => all.findIndex((candidate) => candidate.key === entry.key) === index
+      );
+      return { ...current, sessions: [finished, ...current.sessions].slice(0, 100), exerciseHistory: dedupedHistory.slice(0, 500) };
+    });
     const totalVolume = sessionVolume(finished);
     setLastWorkoutVolume(totalVolume);
     setActiveSession(null);
@@ -440,7 +565,7 @@ export default function App() {
 
         {screen === 'dashboard' && (
           <section className="stack">
-            <button className="primary-btn big" onClick={() => { setDraft(blankWorkout()); setScreen('create'); }}>
+            <button className="primary-btn big" onClick={() => { setDraft(blankWorkout()); setExistingExerciseName(''); setScreen('create'); }}>
               Start Workout
             </button>
             <div className="panel stack">
@@ -506,7 +631,7 @@ export default function App() {
                     key={template.id}
                     className="list-item template-item"
                     onClick={() => {
-                      setActiveSession(createWorkoutSession(template, state.sessions));
+                      setActiveSession(createWorkoutSession(template, state.exerciseHistory));
                       setScreen('live');
                     }}
                   >
@@ -532,6 +657,22 @@ export default function App() {
 
             <div className="panel stack">
               <div className="section-title">Exercises</div>
+              <div className="existing-exercise-picker">
+                <select
+                  value={existingExerciseName}
+                  onChange={(e) => setExistingExerciseName(e.target.value)}
+                >
+                  <option value="">Add existing exercise</option>
+                  {exerciseLibrary.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.name} ({entry.muscle})
+                    </option>
+                  ))}
+                </select>
+                <button className="secondary-btn" onClick={addExistingExercise} disabled={!existingExerciseName}>
+                  Add
+                </button>
+              </div>
               {draft.exercises.map((exercise, index) => (
                 <div className="exercise-row" key={exercise.id}>
                   <input
@@ -547,13 +688,20 @@ export default function App() {
                       <option key={muscle} value={muscle}>{muscle}</option>
                     ))}
                   </select>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => removeDraftExercise(index)}
+                    disabled={draft.exercises.length <= 1}
+                  >
+                    Remove
+                  </button>
                 </div>
               ))}
               <button className="secondary-btn" onClick={addExercise}>+ Add exercise</button>
             </div>
 
             <div className="actions">
-              <button className="secondary-btn" onClick={() => setScreen('dashboard')}>Cancel</button>
+              <button className="secondary-btn" onClick={() => { setExistingExerciseName(''); setScreen('dashboard'); }}>Cancel</button>
               <button className="primary-btn" onClick={saveTemplate}>Save workout</button>
             </div>
           </section>
@@ -586,7 +734,9 @@ export default function App() {
                   <div>
                     <h2>{exercise.name}</h2>
                     <p>{exercise.muscle}</p>
-                    <p className="last-session">{lastSessionForExercise(exercise.name, state.sessions) || 'No previous session'}</p>
+                    <p className="last-session">
+                      {getPreviousExerciseSummary(exercise.name, exercise.muscle, state.exerciseHistory) || 'No previous session'}
+                    </p>
                   </div>
                   <button className="ghost-btn" onClick={() => addSet(exerciseIndex)}>+ Set</button>
                 </div>
