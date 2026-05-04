@@ -1,9 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 
-type MuscleGroup = 'chest' | 'back' | 'legs' | 'shoulders' | 'arms';
+type MuscleGroup =
+  | 'chest'
+  | 'back'
+  | 'shoulders'
+  | 'biceps'
+  | 'triceps'
+  | 'forearms'
+  | 'abs'
+  | 'quads'
+  | 'glutes'
+  | 'calves'
+  | 'other';
 type Exercise = { id: string; name: string; muscle: MuscleGroup };
 type WorkoutTemplate = { id: string; name: string; exercises: Exercise[] };
 type LiveSet = { id: string; weight: string; reps: string; done: boolean };
+type BodyMetricsEntry = { date: string; weight: number; bodyFat: number };
 type WorkoutSession = {
   id: string;
   date: string;
@@ -20,8 +32,9 @@ type LiveWorkout = {
 
 const STORAGE_KEY = 'lift-log-mvp';
 const LIVE_SESSION_KEY = 'lift-log-live-session';
+const METRICS_KEY = 'lift-log-body-metrics';
 const BASE_URL = import.meta.env.BASE_URL;
-const MUSCLES: MuscleGroup[] = ['chest', 'back', 'legs', 'shoulders', 'arms'];
+const MUSCLES: Exclude<MuscleGroup, 'other'>[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'forearms', 'abs', 'quads', 'glutes', 'calves'];
 const DEFAULT_SET_COUNT = 3;
 
 const uid = () => crypto.randomUUID();
@@ -33,7 +46,7 @@ const defaultTemplates: WorkoutTemplate[] = [
     exercises: [
       { id: uid(), name: 'Bench Press', muscle: 'chest' },
       { id: uid(), name: 'Shoulder Press', muscle: 'shoulders' },
-      { id: uid(), name: 'Triceps Pushdown', muscle: 'arms' }
+      { id: uid(), name: 'Triceps Pushdown', muscle: 'triceps' }
     ]
   },
   {
@@ -42,7 +55,7 @@ const defaultTemplates: WorkoutTemplate[] = [
     exercises: [
       { id: uid(), name: 'Barbell Row', muscle: 'back' },
       { id: uid(), name: 'Lat Pulldown', muscle: 'back' },
-      { id: uid(), name: 'Bicep Curl', muscle: 'arms' }
+      { id: uid(), name: 'Bicep Curl', muscle: 'biceps' }
     ]
   }
 ];
@@ -53,14 +66,82 @@ const blankWorkout = (): WorkoutTemplate => ({
   exercises: [{ id: uid(), name: '', muscle: 'chest' }]
 });
 
+function normalizeMuscle(muscle: string): MuscleGroup {
+  const value = muscle.toLowerCase();
+  if (
+    value === 'chest' ||
+    value === 'back' ||
+    value === 'shoulders' ||
+    value === 'biceps' ||
+    value === 'triceps' ||
+    value === 'forearms' ||
+    value === 'abs' ||
+    value === 'quads' ||
+    value === 'glutes' ||
+    value === 'calves'
+  ) {
+    return value;
+  }
+  if (value === 'arms') return 'biceps';
+  if (value === 'legs') return 'quads';
+  return 'other';
+}
+
+function readMetrics(): BodyMetricsEntry[] {
+  try {
+    const raw = localStorage.getItem(METRICS_KEY);
+    return raw ? (JSON.parse(raw) as BodyMetricsEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMetrics(entries: BodyMetricsEntry[]) {
+  localStorage.setItem(METRICS_KEY, JSON.stringify(entries));
+}
+
+function sessionVolume(session: WorkoutSession | LiveWorkout) {
+  return session.exercises.reduce((total, exercise) => {
+    return (
+      total +
+      exercise.sets.reduce((setTotal, set) => {
+        const weight = Number(set.weight);
+        const reps = Number(set.reps);
+        if (!Number.isFinite(weight) || !Number.isFinite(reps)) return setTotal;
+        return setTotal + weight * reps;
+      }, 0)
+    );
+  }, 0);
+}
+
+function sessionMuscleVolume(session: WorkoutSession | LiveWorkout) {
+  return session.exercises.reduce((totals, exercise) => {
+    totals[exercise.muscle] = (totals[exercise.muscle] ?? 0) + exercise.sets.length;
+    return totals;
+  }, {} as Record<MuscleGroup, number>);
+}
+
 function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[] } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { templates: defaultTemplates, sessions: [] };
     const parsed = JSON.parse(raw);
     return {
-      templates: Array.isArray(parsed.templates) && parsed.templates.length ? parsed.templates : defaultTemplates,
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : []
+      templates: Array.isArray(parsed.templates) && parsed.templates.length
+        ? parsed.templates.map((template: WorkoutTemplate) => ({
+            ...template,
+            exercises: template.exercises.map((exercise) => ({ ...exercise, muscle: normalizeMuscle(exercise.muscle) }))
+          }))
+        : defaultTemplates,
+      sessions: Array.isArray(parsed.sessions)
+        ? parsed.sessions.map((session: WorkoutSession) => ({
+            ...session,
+            exercises: session.exercises.map((exercise) => ({
+              ...exercise,
+              muscle: normalizeMuscle(exercise.muscle)
+            }))
+          }))
+        : []
     };
   } catch {
     return { templates: defaultTemplates, sessions: [] };
@@ -77,7 +158,7 @@ function readLiveSession(): LiveWorkout | null {
 }
 
 function formatDate(date: string) {
-  return new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function lastSessionForExercise(exerciseName: string, sessions: WorkoutSession[]) {
@@ -114,8 +195,12 @@ function createWorkoutSession(template: WorkoutTemplate, sessions: WorkoutSessio
 export default function App() {
   const [state, setState] = useState(readState);
   const [screen, setScreen] = useState<'dashboard' | 'create' | 'live' | 'stats'>('dashboard');
+  const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup>('quads');
   const [draft, setDraft] = useState<WorkoutTemplate>(blankWorkout);
   const [activeSession, setActiveSession] = useState<LiveWorkout | null>(() => readLiveSession());
+  const [metrics, setMetrics] = useState<BodyMetricsEntry[]>(() => readMetrics());
+  const [metricDraft, setMetricDraft] = useState({ weight: '', bodyFat: '' });
+  const [lastWorkoutVolume, setLastWorkoutVolume] = useState<number | null>(null);
   const [restUntil, setRestUntil] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
 
@@ -141,18 +226,74 @@ export default function App() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${BASE_URL}sw.js`).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    saveMetrics(metrics);
+  }, [metrics]);
+
   const recentSessions = useMemo(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return state.sessions.filter((session) => new Date(session.date).getTime() >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
   }, [state.sessions]);
 
+  const weeklyVolume = useMemo(
+    () => recentSessions.reduce((total, session) => total + sessionVolume(session), 0),
+    [recentSessions]
+  );
+
   const muscleTotals = useMemo(() => {
-    const totals: Record<MuscleGroup, number> = { chest: 0, back: 0, legs: 0, shoulders: 0, arms: 0 };
+    const totals: Record<MuscleGroup, number> = {
+      chest: 0,
+      back: 0,
+      shoulders: 0,
+      biceps: 0,
+      triceps: 0,
+      forearms: 0,
+      abs: 0,
+      quads: 0,
+      glutes: 0,
+      calves: 0,
+      other: 0
+    };
     for (const session of recentSessions) {
       for (const exercise of session.exercises) totals[exercise.muscle] += exercise.sets.length;
     }
     return totals;
   }, [recentSessions]);
+
+  const metricsPreview = useMemo(() => {
+    const recent = metrics[0];
+    const previous = metrics[1];
+    return { recent, previous };
+  }, [metrics]);
+
+  const previousWorkoutVolume = useMemo(() => {
+    const previousSession = state.sessions[1];
+    return previousSession ? sessionVolume(previousSession) : null;
+  }, [state.sessions]);
+
+  const muscleProgression = useMemo(() => {
+    return recentSessions.map((session) => {
+      const muscleVolume = session.exercises.reduce((total, exercise) => {
+        if (exercise.muscle !== selectedMuscle) return total;
+        return (
+          total +
+          exercise.sets.reduce((setTotal, set) => {
+            const weight = Number(set.weight);
+            const reps = Number(set.reps);
+            if (!Number.isFinite(weight) || !Number.isFinite(reps)) return setTotal;
+            return setTotal + weight * reps;
+          }, 0)
+        );
+      }, 0);
+
+      return { date: session.date, volume: muscleVolume };
+    });
+  }, [recentSessions, selectedMuscle]);
+
+  const selectedMuscleSummary = useMemo(() => {
+    const [current, previous] = muscleProgression;
+    return { current, previous };
+  }, [muscleProgression]);
 
   const saveDraftExercise = (index: number, patch: Partial<Exercise>) => {
     setDraft((current) => {
@@ -167,6 +308,14 @@ export default function App() {
       ...current,
       exercises: [...current.exercises, { id: uid(), name: '', muscle: 'chest' }]
     }));
+  };
+
+  const saveBodyMetrics = () => {
+    const weight = Number(metricDraft.weight);
+    const bodyFat = Number(metricDraft.bodyFat);
+    if (!Number.isFinite(weight) || !Number.isFinite(bodyFat)) return;
+    setMetrics((current) => [{ date: new Date().toISOString(), weight, bodyFat }, ...current].slice(0, 100));
+    setMetricDraft({ weight: '', bodyFat: '' });
   };
 
   const saveTemplate = () => {
@@ -267,6 +416,8 @@ export default function App() {
     };
 
     setState((current) => ({ ...current, sessions: [finished, ...current.sessions].slice(0, 100) }));
+    const totalVolume = sessionVolume(finished);
+    setLastWorkoutVolume(totalVolume);
     setActiveSession(null);
     setRestUntil(null);
     setScreen('dashboard');
@@ -292,13 +443,68 @@ export default function App() {
             <button className="primary-btn big" onClick={() => { setDraft(blankWorkout()); setScreen('create'); }}>
               Start Workout
             </button>
+            <div className="panel stack">
+              <div className="section-title">This Week</div>
+              <div className="stat-row">
+                <span>Volume</span>
+                <strong>{weeklyVolume.toLocaleString()} lbs</strong>
+              </div>
+              <div className="stat-row">
+                <span>Last Workout</span>
+                <strong>
+                  {lastWorkoutVolume !== null ? `${lastWorkoutVolume.toLocaleString()} lbs` : 'No workouts yet'}
+                </strong>
+              </div>
+            </div>
+            <div className="panel stack">
+              <div className="section-title">Body Metrics</div>
+              <div className="exercise-row">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Weight (lbs)"
+                  value={metricDraft.weight}
+                  onChange={(e) => setMetricDraft((current) => ({ ...current, weight: e.target.value }))}
+                />
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Body fat (%)"
+                  value={metricDraft.bodyFat}
+                  onChange={(e) => setMetricDraft((current) => ({ ...current, bodyFat: e.target.value }))}
+                />
+              </div>
+              <button className="secondary-btn" onClick={saveBodyMetrics}>Save metrics</button>
+              <div className="stack">
+                <div className="stat-row">
+                  <span>Weight</span>
+                  <strong>
+                    {metricsPreview.recent && metricsPreview.previous
+                      ? `${metricsPreview.previous.weight} → ${metricsPreview.recent.weight} lbs`
+                      : metricsPreview.recent
+                        ? `${metricsPreview.recent.weight} lbs`
+                        : 'No entries yet'}
+                  </strong>
+                </div>
+                <div className="stat-row">
+                  <span>Body Fat</span>
+                  <strong>
+                    {metricsPreview.recent && metricsPreview.previous
+                      ? `${metricsPreview.previous.bodyFat}% → ${metricsPreview.recent.bodyFat}%`
+                      : metricsPreview.recent
+                        ? `${metricsPreview.recent.bodyFat}%`
+                        : 'No entries yet'}
+                  </strong>
+                </div>
+              </div>
+            </div>
             <div className="panel">
               <div className="section-title">Workout templates</div>
               <div className="list">
                 {state.templates.map((template) => (
                   <button
                     key={template.id}
-                    className="list-item"
+                    className="list-item template-item"
                     onClick={() => {
                       setActiveSession(createWorkoutSession(template, state.sessions));
                       setScreen('live');
@@ -337,7 +543,7 @@ export default function App() {
                     value={exercise.muscle}
                     onChange={(e) => saveDraftExercise(index, { muscle: e.target.value as MuscleGroup })}
                   >
-                    {MUSCLES.map((muscle) => (
+                    {[...MUSCLES, 'other'].map((muscle) => (
                       <option key={muscle} value={muscle}>{muscle}</option>
                     ))}
                   </select>
@@ -428,15 +634,60 @@ export default function App() {
 
         {screen === 'stats' && (
           <section className="stack">
-            <div className="panel">
+            <div className="panel stack stats-compact-panel">
+              <div className="section-title">Progressive Overload</div>
+              <div className="muscle-tabs muscle-tabs-vertical">
+                {[...MUSCLES, 'other'].map((muscle) => {
+                  const key = muscle as MuscleGroup;
+                  return (
+                    <button
+                      key={key}
+                      className={selectedMuscle === key ? 'muscle-tab muscle-tab-active' : 'muscle-tab'}
+                      onClick={() => setSelectedMuscle(key)}
+                    >
+                      {key.charAt(0).toUpperCase() + key.slice(1)}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="stat-row">
+                <span>{selectedMuscle} this week</span>
+                <strong>
+                  {muscleProgression.reduce((total, entry) => total + entry.volume, 0).toLocaleString()} lbs
+                </strong>
+              </div>
+              <div className="stat-row">
+                <span>Most recent</span>
+                <strong>
+                  {selectedMuscleSummary.current
+                    ? `${selectedMuscleSummary.current.volume.toLocaleString()} lbs on ${formatDate(selectedMuscleSummary.current.date)}`
+                    : 'No recent sets'}
+                </strong>
+              </div>
+              <div className="stat-row">
+                <span>Previous</span>
+                <strong>
+                  {selectedMuscleSummary.previous
+                    ? `${selectedMuscleSummary.previous.volume.toLocaleString()} lbs on ${formatDate(selectedMuscleSummary.previous.date)}`
+                    : 'No previous session'}
+                </strong>
+              </div>
+              {selectedMuscleSummary.current && selectedMuscleSummary.previous && (
+                <div className="muted">
+                  Change: {selectedMuscleSummary.previous.volume.toLocaleString()} → {selectedMuscleSummary.current.volume.toLocaleString()} lbs
+                </div>
+              )}
+            </div>
+            <div className="panel stats-compact-panel">
               <div className="section-title">Last 7 days</div>
               <div className="stats-list">
-                {MUSCLES.map((muscle) => {
-                  const count = muscleTotals[muscle];
+                {[...MUSCLES, 'other'].map((muscle) => {
+                  const muscleKey = muscle as MuscleGroup;
+                  const count = muscleTotals[muscleKey];
                   const bar = '█'.repeat(Math.max(1, Math.min(12, Math.round(count / 2))));
                   return (
-                    <div key={muscle} className="stat-row">
-                      <span>{muscle}</span>
+                    <div key={muscleKey} className="stat-row">
+                      <span>{muscleKey.charAt(0).toUpperCase() + muscleKey.slice(1)}</span>
                       <strong>{bar} ({count})</strong>
                     </div>
                   );
@@ -444,17 +695,43 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panel">
+            <div className="panel stats-compact-panel">
               <div className="section-title">Recent workouts</div>
               <div className="list">
                 {recentSessions.map((session) => (
-                  <div key={session.id} className="list-item static">
+                  <div key={session.id} className="list-item static recent-workout-item">
                     <strong>{session.templateName}</strong>
-                    <span>{formatDate(session.date)}</span>
+                    <span>
+                      {formatDate(session.date)} · {sessionVolume(session).toLocaleString()} lbs
+                    </span>
                   </div>
                 ))}
                 {!recentSessions.length && <p className="muted">No workouts logged in the last 7 days.</p>}
               </div>
+            </div>
+            <div className="panel stack stats-compact-panel">
+              <div className="section-title">Body Metrics History</div>
+              {metrics.length ? (
+                metrics.slice(0, 5).map((entry, index) => {
+                  const next = metrics[index + 1];
+                  return (
+                    <div key={`${entry.date}-${index}`} className="metric-history-row">
+                      <div className="metric-history-date">{formatDate(entry.date)}</div>
+                      <div className="metric-history-values">
+                        <span>Weight: {entry.weight} lbs</span>
+                        <span>Body Fat: {entry.bodyFat}%</span>
+                      </div>
+                      {next && (
+                        <div className="metric-history-delta">
+                          Compared to {formatDate(next.date)}: {next.weight} → {entry.weight} lbs, {next.bodyFat}% → {entry.bodyFat}%
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="muted">No body metrics recorded yet.</p>
+              )}
             </div>
 
             <button className="secondary-btn" onClick={() => setScreen('dashboard')}>Back</button>
