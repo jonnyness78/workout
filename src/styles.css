@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: linear-gradient(180deg, #f8fafc, #eef2ff 65%, #e2e8f0);
+  color: #0f172a;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; margin: 0; }
+body { -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; }
+
+.app-shell { min-height: 100svh; display: grid; place-items: center; padding: 16px; }
+.app-card { width: min(100%, 400px); background: #fff; border: 1px solid #dbe4f0; border-radius: 28px; padding: 16px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08); }
+
+.topbar, .exercise-head, .exercise-row, .set-row, .actions, .stat-row, .bottom-nav { display: flex; gap: 10px; align-items: center; }
+.topbar, .exercise-head, .actions, .stat-row { justify-content: space-between; }
+.stack { display: grid; gap: 14px; }
+.eyebrow { margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.12em; color: #64748b; font-size: 12px; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 26px; line-height: 1.05; }
+h2 { font-size: 18px; }
+
+.panel, .exercise-card, .list-item, .field input, .exercise-row, .set-row { border: 1px solid #dbe4f0; background: #fff; border-radius: 20px; }
+.panel { padding: 14px; }
+.section-title { font-size: 13px; color: #475569; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+.list { display: grid; gap: 10px; }
+.list-item { width: 100%; text-align: left; padding: 14px; color: inherit; }
+.list-item span, .muted, .field span, .exercise-head p, .last-session { color: #64748b; font-size: 13px; }
+
+.field { display: grid; gap: 8px; }
+.field input, .exercise-row input, .exercise-row select, .set-row input {
+  width: 100%;
+  color: #0f172a;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  outline: none;
+  background: #f8fafc;
+  border-radius: 16px;
+}
+.field input::placeholder, .exercise-row input::placeholder, .set-row input::placeholder { color: #94a3b8; }
+.field input, .exercise-row, .set-row { min-height: 54px; }
+.exercise-row, .set-row { padding: 10px; }
+.exercise-card { padding: 14px; display: grid; gap: 12px; }
+.sets { display: grid; gap: 10px; }
+.set-row { display: grid; gap: 10px; }
+.set-row-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.set-row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.set-field { display: grid; gap: 6px; }
+.set-field label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; }
+
+.primary-btn, .secondary-btn, .ghost-btn { border: 0; border-radius: 18px; min-height: 48px; padding: 0 16px; cursor: pointer; }
+.primary-btn { background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #fff; font-weight: 700; }
+.secondary-btn, .ghost-btn { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; }
+.big { min-height: 56px; font-size: 16px; }
+
+.sticky-workout-bar {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+.sticky-workout-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.sticky-workout-title .section-title { margin: 0; font-size: 12px; }
+.sticky-workout-status { font-size: 11px; color: #64748b; white-space: nowrap; }
+.sticky-workout-bar .timer-wrap { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.timer { color: #0f172a; font-weight: 700; font-size: 14px; }
+.timer-controls { display: flex; gap: 8px; }
+.timer-controls button { min-width: 40px; min-height: 38px; padding: 0 10px; font-size: 12px; }
+
+.done { opacity: 0.72; }
+.bottom-nav { margin-top: 14px; justify-content: space-between; }
+.bottom-nav button { flex: 1; border: 0; border-radius: 16px; min-height: 44px; background: #f8fafc; color: #64748b; }
+.nav-active { background: #dbeafe !important; color: #0f172a !important; }
+
+@media (max-width: 420px) {
+  .app-card { padding: 12px; border-radius: 24px; }
+}
