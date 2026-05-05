@@ -594,7 +594,7 @@ export default function App() {
     const currentExercise = activeSession?.exercises[exerciseIndex];
     const nextSet = currentExercise?.sets[setIndex + 1];
     const nextExercise = activeSession?.exercises[exerciseIndex + 1];
-    if (currentExercise && nextSet) scrollLiveTarget(`#live-set-${currentExercise.id}-${nextSet.id}`, 0.12);
+    if (currentExercise && nextSet) scrollLiveTarget(`#live-set-${currentExercise.id}-${nextSet.id}`, 0.13);
     else if (nextExercise) scrollLiveTarget(`#live-exercise-${nextExercise.id}`, 0.2);
   };
 
