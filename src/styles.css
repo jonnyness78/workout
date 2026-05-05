@@ -224,16 +224,13 @@ h2 { font-size: 18px; }
   top: 12px;
   z-index: 20;
   margin-bottom: 14px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border: 1px solid #dbe4f0;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
-.sticky-workout-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-.sticky-workout-title .section-title { margin: 0; font-size: 12px; }
-.sticky-workout-status { font-size: 11px; color: #64748b; white-space: nowrap; }
 .sticky-workout-bar .timer-wrap { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .timer { color: #0f172a; font-weight: 700; font-size: 14px; }
 .timer-controls { display: flex; gap: 8px; }

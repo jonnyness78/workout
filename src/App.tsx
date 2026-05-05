@@ -868,10 +868,6 @@ export default function App() {
         {screen === 'live' && activeSession && (
           <section className="stack">
             <div className="sticky-workout-bar">
-              <div className="sticky-workout-title">
-                <div className="section-title">{activeSession.templateName}</div>
-                <div className="sticky-workout-status">Sticky rest timer</div>
-              </div>
               <div className="timer-wrap">
                 {restUntil && Date.now() < restUntil ? (
                   <div className="timer">{`Rest ${timerLeft}s`}</div>
