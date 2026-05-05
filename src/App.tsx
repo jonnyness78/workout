@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type MuscleGroup =
   | 'chest'
@@ -36,6 +36,7 @@ type LiveWorkout = {
   templateName: string;
   exercises: Array<{ id: string; name: string; muscle: MuscleGroup; sets: LiveSet[] }>;
 };
+type ExerciseSeed = { name: string; muscle: MuscleGroup };
 
 const STORAGE_KEY = 'lift-log-mvp';
 const LIVE_SESSION_KEY = 'lift-log-live-session';
@@ -228,29 +229,31 @@ function getPreviousExerciseSummary(exerciseName: string, muscle: MuscleGroup, h
   return `Previous: ${last.weight} x ${last.reps} · ${lastSets.length} sets`;
 }
 
+function createLiveExercise(seed: ExerciseSeed, history: ExerciseHistoryEntry[]) {
+  const lastSets = getLastExerciseSets(seed.name, seed.muscle, history);
+  const setCount = getLastExerciseSetCount(seed.name, seed.muscle, history);
+  return {
+    id: uid(),
+    name: seed.name,
+    muscle: seed.muscle,
+    sets: Array.from({ length: setCount }, (_, index) => {
+      const prev = lastSets[index] ?? lastSets[lastSets.length - 1] ?? null;
+      return {
+        id: uid(),
+        weight: String(prev?.weight ?? ''),
+        reps: String(prev?.reps ?? ''),
+        done: false
+      };
+    })
+  };
+}
+
 function createWorkoutSession(template: WorkoutTemplate, history: ExerciseHistoryEntry[]): LiveWorkout {
   return {
     id: uid(),
     templateId: template.id,
     templateName: template.name,
-    exercises: template.exercises.map((exercise) => {
-      const lastSets = getLastExerciseSets(exercise.name, exercise.muscle, history);
-      const setCount = getLastExerciseSetCount(exercise.name, exercise.muscle, history);
-      return {
-        id: exercise.id,
-        name: exercise.name,
-        muscle: exercise.muscle,
-        sets: Array.from({ length: setCount }, (_, index) => {
-          const prev = lastSets[index] ?? lastSets[lastSets.length - 1] ?? null;
-          return {
-            id: uid(),
-            weight: String(prev?.weight ?? ''),
-            reps: String(prev?.reps ?? ''),
-            done: false
-          };
-        })
-      };
-    })
+    exercises: template.exercises.map((exercise) => createLiveExercise(exercise, history))
   };
 }
 
@@ -259,13 +262,20 @@ export default function App() {
   const [screen, setScreen] = useState<'dashboard' | 'create' | 'live' | 'stats'>('dashboard');
   const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup>('quads');
   const [draft, setDraft] = useState<WorkoutTemplate>(blankWorkout);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [existingExerciseName, setExistingExerciseName] = useState('');
+  const [liveExistingExerciseName, setLiveExistingExerciseName] = useState('');
+  const [liveNewExerciseName, setLiveNewExerciseName] = useState('');
+  const [liveNewExerciseMuscle, setLiveNewExerciseMuscle] = useState<MuscleGroup>('chest');
   const [activeSession, setActiveSession] = useState<LiveWorkout | null>(() => readLiveSession());
   const [metrics, setMetrics] = useState<BodyMetricsEntry[]>(() => readMetrics());
   const [metricDraft, setMetricDraft] = useState({ weight: '', bodyFat: '' });
   const [lastWorkoutVolume, setLastWorkoutVolume] = useState<number | null>(null);
   const [restUntil, setRestUntil] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const liveAddSectionRef = useRef<HTMLDivElement | null>(null);
+  const timerPrevRef = useRef<number>(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -382,7 +392,7 @@ export default function App() {
       }
     }
     return [...library.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [state.exerciseHistory]);
+  }, [state.exerciseHistory, state.templates]);
 
   const saveDraftExercise = (index: number, patch: Partial<Exercise>) => {
     setDraft((current) => {
@@ -416,6 +426,100 @@ export default function App() {
     setExistingExerciseName('');
   };
 
+  const startCreateWorkout = () => {
+    setDraft(blankWorkout());
+    setEditingTemplateId(null);
+    setExistingExerciseName('');
+    setScreen('create');
+  };
+
+  const startEditWorkout = (template: WorkoutTemplate) => {
+    setDraft(structuredClone(template));
+    setEditingTemplateId(template.id);
+    setExistingExerciseName('');
+    setScreen('create');
+  };
+
+  const duplicateWorkout = (template: WorkoutTemplate) => {
+    const clone = structuredClone(template);
+    clone.id = uid();
+    clone.name = clone.name.endsWith(' Copy') ? `${clone.name} 2` : `${clone.name} Copy`;
+    clone.exercises = clone.exercises.map((exercise) => ({ ...exercise, id: uid() }));
+    setDraft(clone);
+    setEditingTemplateId(null);
+    setExistingExerciseName('');
+    setScreen('create');
+  };
+
+  const deleteWorkout = (templateId: string) => {
+    if (!window.confirm('Delete this workout template?')) return;
+    setState((current) => ({ ...current, templates: current.templates.filter((template) => template.id !== templateId) }));
+  };
+
+  const addExerciseToLiveWorkout = (seed: ExerciseSeed) => {
+    setActiveSession((current) => {
+      if (!current) return current;
+      return { ...current, exercises: [...current.exercises, createLiveExercise(seed, state.exerciseHistory)] };
+    });
+  };
+
+  const addExistingExerciseToLive = () => {
+    const selected = exerciseLibrary.find((entry) => entry.key === liveExistingExerciseName);
+    if (!selected) return;
+    addExerciseToLiveWorkout({ name: selected.name, muscle: selected.muscle });
+    setLiveExistingExerciseName('');
+  };
+
+  const addNewExerciseToLive = () => {
+    if (!liveNewExerciseName.trim()) return;
+    addExerciseToLiveWorkout({ name: liveNewExerciseName.trim(), muscle: liveNewExerciseMuscle });
+    setLiveNewExerciseName('');
+    setLiveNewExerciseMuscle('chest');
+  };
+
+  const moveExercise = (exerciseIndex: number, direction: -1 | 1) => {
+    setActiveSession((current) => {
+      if (!current) return current;
+      const targetIndex = exerciseIndex + direction;
+      if (targetIndex < 0 || targetIndex >= current.exercises.length) return current;
+      const exercises = current.exercises.slice();
+      [exercises[exerciseIndex], exercises[targetIndex]] = [exercises[targetIndex], exercises[exerciseIndex]];
+      return { ...current, exercises };
+    });
+  };
+
+  const scrollLiveTarget = (selector: string) => {
+    window.setTimeout(() => {
+      document.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
+  const playRestAlarm = async () => {
+    if (navigator.vibrate) navigator.vibrate(200);
+    try {
+      const AudioContextCtor =
+        window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) return;
+      audioContextRef.current ??= new AudioContextCtor();
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') await ctx.resume();
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 880;
+      gain.gain.value = 0.0001;
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      const currentTime = ctx.currentTime;
+      gain.gain.exponentialRampToValueAtTime(0.15, currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.25);
+      oscillator.start(currentTime);
+      oscillator.stop(currentTime + 0.26);
+    } catch {
+      // Ignore audio failures on browsers that block playback.
+    }
+  };
+
   const saveBodyMetrics = () => {
     const weight = Number(metricDraft.weight);
     const bodyFat = Number(metricDraft.bodyFat);
@@ -426,8 +530,17 @@ export default function App() {
 
   const saveTemplate = () => {
     if (!draft.name.trim() || !draft.exercises.some((exercise) => exercise.name.trim())) return;
-    setState((current) => ({ ...current, templates: [structuredClone(draft), ...current.templates] }));
+    setState((current) => {
+      if (editingTemplateId) {
+        return {
+          ...current,
+          templates: current.templates.map((template) => (template.id === editingTemplateId ? structuredClone(draft) : template))
+        };
+      }
+      return { ...current, templates: [structuredClone(draft), ...current.templates] };
+    });
     setDraft(blankWorkout());
+    setEditingTemplateId(null);
     setExistingExerciseName('');
     setScreen('dashboard');
   };
@@ -464,6 +577,11 @@ export default function App() {
       return { ...current, exercises };
     });
     setRestUntil(Date.now() + 30000);
+    const currentExercise = activeSession?.exercises[exerciseIndex];
+    const nextSet = currentExercise?.sets[setIndex + 1];
+    const nextExercise = activeSession?.exercises[exerciseIndex + 1];
+    if (currentExercise && nextSet) scrollLiveTarget(`#live-set-${currentExercise.id}-${nextSet.id}`);
+    else if (nextExercise) scrollLiveTarget(`#live-exercise-${nextExercise.id}`);
   };
 
   const adjustRest = (deltaSeconds: number) => {
@@ -492,6 +610,8 @@ export default function App() {
       });
       return { ...current, exercises };
     });
+    const currentExercise = activeSession?.exercises[exerciseIndex];
+    if (currentExercise) scrollLiveTarget(`#live-exercise-${currentExercise.id}`);
   };
 
   const removeSet = (exerciseIndex: number, setIndex: number) => {
@@ -550,6 +670,13 @@ export default function App() {
 
   const timerLeft = restUntil ? Math.max(0, Math.ceil((restUntil - now) / 1000)) : 0;
 
+  useEffect(() => {
+    if (timerPrevRef.current > 0 && restUntil && timerLeft === 0) {
+      void playRestAlarm();
+    }
+    timerPrevRef.current = timerLeft;
+  }, [restUntil, timerLeft]);
+
   return (
     <div className="app-shell">
       <main className="app-card">
@@ -565,7 +692,7 @@ export default function App() {
 
         {screen === 'dashboard' && (
           <section className="stack">
-            <button className="primary-btn big" onClick={() => { setDraft(blankWorkout()); setExistingExerciseName(''); setScreen('create'); }}>
+            <button className="primary-btn big" onClick={startCreateWorkout}>
               Start Workout
             </button>
             <div className="panel stack">
@@ -627,17 +754,23 @@ export default function App() {
               <div className="section-title">Workout templates</div>
               <div className="list">
                 {state.templates.map((template) => (
-                  <button
-                    key={template.id}
-                    className="list-item template-item"
-                    onClick={() => {
-                      setActiveSession(createWorkoutSession(template, state.exerciseHistory));
-                      setScreen('live');
-                    }}
-                  >
-                    <strong>{template.name}</strong>
-                    <span>{template.exercises.length} exercises</span>
-                  </button>
+                  <div key={template.id} className="list-item template-item template-card">
+                    <button
+                      className="template-card-main"
+                      onClick={() => {
+                        setActiveSession(createWorkoutSession(template, state.exerciseHistory));
+                        setScreen('live');
+                      }}
+                    >
+                      <strong>{template.name}</strong>
+                      <span>{template.exercises.length} exercises</span>
+                    </button>
+                    <div className="template-card-actions">
+                      <button className="ghost-btn" onClick={() => startEditWorkout(template)}>Edit</button>
+                      <button className="ghost-btn" onClick={() => duplicateWorkout(template)}>Duplicate</button>
+                      <button className="ghost-btn" onClick={() => deleteWorkout(template.id)}>Delete</button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -647,7 +780,7 @@ export default function App() {
         {screen === 'create' && (
           <section className="stack">
             <label className="field">
-              <span>Workout name</span>
+              <span>{editingTemplateId ? 'Edit workout name' : 'Workout name'}</span>
               <input
                 value={draft.name}
                 onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))}
@@ -701,8 +834,19 @@ export default function App() {
             </div>
 
             <div className="actions">
-              <button className="secondary-btn" onClick={() => { setExistingExerciseName(''); setScreen('dashboard'); }}>Cancel</button>
-              <button className="primary-btn" onClick={saveTemplate}>Save workout</button>
+              <button
+                className="secondary-btn"
+                onClick={() => {
+                  setEditingTemplateId(null);
+                  setExistingExerciseName('');
+                  setScreen('dashboard');
+                }}
+              >
+                Cancel
+              </button>
+              <button className="primary-btn" onClick={saveTemplate}>
+                {editingTemplateId ? 'Update workout' : 'Save workout'}
+              </button>
             </div>
           </section>
         )}
@@ -729,7 +873,7 @@ export default function App() {
             </div>
 
             {activeSession.exercises.map((exercise, exerciseIndex) => (
-              <article className="exercise-card" key={exercise.id}>
+              <article className="exercise-card" key={exercise.id} id={`live-exercise-${exercise.id}`}>
                 <div className="exercise-head">
                   <div>
                     <h2>{exercise.name}</h2>
@@ -738,12 +882,21 @@ export default function App() {
                       {getPreviousExerciseSummary(exercise.name, exercise.muscle, state.exerciseHistory) || 'No previous session'}
                     </p>
                   </div>
-                  <button className="ghost-btn" onClick={() => addSet(exerciseIndex)}>+ Set</button>
+                  <div className="exercise-head-actions">
+                    <button className="ghost-btn" onClick={() => moveExercise(exerciseIndex, -1)} disabled={exerciseIndex === 0}>
+                      ↑
+                    </button>
+                    <button className="ghost-btn" onClick={() => moveExercise(exerciseIndex, 1)} disabled={exerciseIndex === activeSession.exercises.length - 1}>
+                      ↓
+                    </button>
+                    <button className="ghost-btn" onClick={() => addSet(exerciseIndex)}>+ Set</button>
+                  </div>
                 </div>
 
                 <div className="sets">
                   {exercise.sets.map((set, setIndex) => (
-                    <div className={`set-row ${set.done ? 'done' : ''}`} key={set.id}>
+                    <div className={`set-row ${set.done ? 'done' : ''}`} key={set.id} id={`live-set-${exercise.id}-${set.id}`}>
+                      <div className="set-number">Set {setIndex + 1}</div>
                       <div className="set-row-fields">
                         <div className="set-field">
                           <label>Weight</label>
@@ -767,7 +920,10 @@ export default function App() {
                         </div>
                       </div>
                       <div className="set-row-actions">
-                        <button className="primary-btn" onClick={() => completeSet(exerciseIndex, setIndex)}>
+                        <button
+                          className={set.done ? 'primary-btn set-complete-btn set-complete-btn-done' : 'primary-btn set-complete-btn'}
+                          onClick={() => completeSet(exerciseIndex, setIndex)}
+                        >
                           {set.done ? 'Done' : 'Complete'}
                         </button>
                         <button className="ghost-btn" onClick={() => removeSet(exerciseIndex, setIndex)}>Remove</button>
@@ -777,6 +933,44 @@ export default function App() {
                 </div>
             </article>
             ))}
+
+            <div ref={liveAddSectionRef} className="panel stack live-add-panel">
+              <div className="section-title">Add exercise</div>
+              <div className="existing-exercise-picker">
+                <select
+                  value={liveExistingExerciseName}
+                  onChange={(e) => setLiveExistingExerciseName(e.target.value)}
+                >
+                  <option value="">Add existing exercise</option>
+                  {exerciseLibrary.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.name} ({entry.muscle})
+                    </option>
+                  ))}
+                </select>
+                <button className="secondary-btn" onClick={addExistingExerciseToLive} disabled={!liveExistingExerciseName}>
+                  Add
+                </button>
+              </div>
+              <div className="exercise-row live-new-exercise-row">
+                <input
+                  value={liveNewExerciseName}
+                  onChange={(e) => setLiveNewExerciseName(e.target.value)}
+                  placeholder="New exercise"
+                />
+                <select
+                  value={liveNewExerciseMuscle}
+                  onChange={(e) => setLiveNewExerciseMuscle(e.target.value as MuscleGroup)}
+                >
+                  {[...MUSCLES, 'other'].map((muscle) => (
+                    <option key={muscle} value={muscle}>{muscle}</option>
+                  ))}
+                </select>
+                <button className="secondary-btn" onClick={addNewExerciseToLive} disabled={!liveNewExerciseName.trim()}>
+                  Add
+                </button>
+              </div>
+            </div>
 
             <button className="primary-btn big" onClick={finishWorkout}>Finish Workout</button>
           </section>

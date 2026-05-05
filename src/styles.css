@@ -43,12 +43,36 @@ h2 { font-size: 18px; }
   display: grid;
   gap: 6px;
 }
+.template-card {
+  gap: 10px;
+}
+.template-card-main {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
 .template-item strong {
   display: block;
   margin-bottom: 2px;
 }
 .template-item span {
   line-height: 1.2;
+}
+.template-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.template-card-actions .ghost-btn {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 .recent-workout-item {
   display: grid;
@@ -112,16 +136,57 @@ h2 { font-size: 18px; }
 }
 .exercise-card { padding: 14px; display: grid; gap: 12px; }
 .sets { display: grid; gap: 10px; }
-.set-row { display: grid; gap: 10px; }
+.set-row { display: grid; gap: 10px; transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease; }
 .set-row-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .set-row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .set-field { display: grid; gap: 6px; }
 .set-field label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; }
+.set-number { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+.exercise-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.exercise-head-actions .ghost-btn { min-width: 40px; padding: 0 10px; }
+.live-add-panel { padding: 12px; }
+.live-new-exercise-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(120px, 0.8fr) auto; align-items: center; }
 
 .primary-btn, .secondary-btn, .ghost-btn { border: 0; border-radius: 18px; min-height: 48px; padding: 0 16px; cursor: pointer; }
 .primary-btn { background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #fff; font-weight: 700; }
 .secondary-btn, .ghost-btn { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; }
 .big { min-height: 56px; font-size: 16px; }
+.set-complete-btn { transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease, opacity 0.2s ease; }
+.set-complete-btn-done { background: #dbeafe; color: #1e3a8a; }
+.set-row.done {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  opacity: 0.82;
+}
+.set-row.done .set-field input {
+  background: #eef2f7;
+  color: #64748b;
+}
+.set-row.done .ghost-btn {
+  opacity: 0.8;
+}
+.live-add-panel .section-title {
+  margin-bottom: 4px;
+}
+.live-add-panel .existing-exercise-picker {
+  margin-bottom: 2px;
+}
+.live-new-exercise-row input,
+.live-new-exercise-row select {
+  min-height: 48px;
+}
+.exercise-head {
+  align-items: flex-start;
+}
+.exercise-head > div {
+  min-width: 0;
+}
+.exercise-head h2 {
+  margin-bottom: 2px;
+}
+.exercise-head p + p {
+  margin-top: 2px;
+}
 
 .muscle-tabs {
   display: flex;
@@ -206,4 +271,28 @@ h2 { font-size: 18px; }
   .panel { padding: 10px; }
   .section-title { margin-bottom: 8px; }
   .muscle-tab { min-height: 34px; padding: 7px 10px; }
+  .exercise-head { gap: 8px; }
+  .exercise-head-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .exercise-head-actions .ghost-btn {
+    min-height: 40px;
+  }
+  .set-row-actions {
+    grid-template-columns: 1fr;
+  }
+  .set-row-fields {
+    gap: 8px;
+  }
+  .live-add-panel {
+    padding: 10px;
+  }
+  .existing-exercise-picker {
+    grid-template-columns: 1fr;
+  }
+  .existing-exercise-picker .secondary-btn {
+    width: 100%;
+  }
+  .live-new-exercise-row { grid-template-columns: 1fr; }
 }
