@@ -156,7 +156,7 @@ h2 { font-size: 18px; }
 .set-row.done {
   background: #f8fafc;
   border-color: #e2e8f0;
-  opacity: 0.82;
+  opacity: 0.4;
 }
 .set-row.done .set-field input {
   background: #eef2f7;

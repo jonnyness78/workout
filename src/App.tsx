@@ -274,6 +274,7 @@ export default function App() {
   const [restUntil, setRestUntil] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const liveAddSectionRef = useRef<HTMLDivElement | null>(null);
+  const appCardRef = useRef<HTMLElement | null>(null);
   const timerPrevRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -293,6 +294,14 @@ export default function App() {
   useEffect(() => {
     if (activeSession) setScreen('live');
   }, [activeSession]);
+
+  useEffect(() => {
+    if (screen === 'live') {
+      window.setTimeout(() => {
+        appCardRef.current?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      }, 0);
+    }
+  }, [screen, activeSession?.id]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -488,9 +497,14 @@ export default function App() {
     });
   };
 
-  const scrollLiveTarget = (selector: string) => {
+  const scrollLiveTarget = (selector: string, offsetRatio = 0) => {
     window.setTimeout(() => {
-      document.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const target = document.querySelector<HTMLElement>(selector);
+      const container = appCardRef.current;
+      if (!target || !container) return;
+      const targetTop = target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      const offset = container.clientHeight * offsetRatio;
+      container.scrollTo({ top: Math.max(0, targetTop - offset), behavior: 'smooth' });
     }, 50);
   };
 
@@ -580,8 +594,8 @@ export default function App() {
     const currentExercise = activeSession?.exercises[exerciseIndex];
     const nextSet = currentExercise?.sets[setIndex + 1];
     const nextExercise = activeSession?.exercises[exerciseIndex + 1];
-    if (currentExercise && nextSet) scrollLiveTarget(`#live-set-${currentExercise.id}-${nextSet.id}`);
-    else if (nextExercise) scrollLiveTarget(`#live-exercise-${nextExercise.id}`);
+    if (currentExercise && nextSet) scrollLiveTarget(`#live-set-${currentExercise.id}-${nextSet.id}`, 0.12);
+    else if (nextExercise) scrollLiveTarget(`#live-exercise-${nextExercise.id}`, 0.2);
   };
 
   const adjustRest = (deltaSeconds: number) => {
@@ -611,7 +625,7 @@ export default function App() {
       return { ...current, exercises };
     });
     const currentExercise = activeSession?.exercises[exerciseIndex];
-    if (currentExercise) scrollLiveTarget(`#live-exercise-${currentExercise.id}`);
+    if (currentExercise) scrollLiveTarget(`#live-exercise-${currentExercise.id}`, 0.15);
   };
 
   const removeSet = (exerciseIndex: number, setIndex: number) => {
@@ -679,7 +693,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <main className="app-card">
+      <main className="app-card" ref={appCardRef}>
         {screen !== 'live' && (
           <header className="topbar">
             <div>
