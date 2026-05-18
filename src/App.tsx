@@ -808,22 +808,27 @@ export default function App() {
       <main className="app-card" ref={appCardRef}>
         {screen !== 'live' && (
           <header className="topbar">
-            <div>
-              <p className="eyebrow">Lift Log</p>
-              <h1>Fast weightlifting tracker</h1>
-              <p className="muted">{syncMessage}</p>
+            <div className="topbar-copy">
+              <h1>Lift Log</h1>
+              <p className="muted status-note">
+                <span className="status-badge" aria-hidden="true">✓</span>
+                <span>{syncMessage}</span>
+              </p>
             </div>
-            <button className="ghost-btn" onClick={() => setScreen('stats')}>Stats</button>
+            <button className="ghost-btn topbar-stats-btn" onClick={() => setScreen('stats')}>
+              <span aria-hidden="true">◫</span>
+              <span>Stats</span>
+            </button>
           </header>
         )}
 
         {screen === 'dashboard' && (
-          <section className="stack">
-            <button className="primary-btn big" onClick={startCreateWorkout}>
-              Start Workout
-            </button>
-            <div className="panel stack">
-              <div className="section-title">This Week</div>
+          <section className="stack dashboard-stack">
+            <div className="panel stack dashboard-panel weekly-panel">
+              <div className="section-title section-title-with-icon">
+                <span className="section-icon" aria-hidden="true">◷</span>
+                <span>This Week</span>
+              </div>
               <div className="stat-row">
                 <span>Volume</span>
                 <strong>{weeklyVolume.toLocaleString()} lbs</strong>
@@ -835,8 +840,11 @@ export default function App() {
                 </strong>
               </div>
             </div>
-            <div className="panel stack">
-              <div className="section-title">Body Metrics</div>
+            <div className="panel stack dashboard-panel body-metrics-panel">
+              <div className="section-title section-title-with-icon">
+                <span className="section-icon" aria-hidden="true">◌</span>
+                <span>Body Metrics</span>
+              </div>
               <div className="exercise-row">
                 <input
                   type="number"
@@ -853,9 +861,12 @@ export default function App() {
                   onChange={(e) => setMetricDraft((current) => ({ ...current, bodyFat: e.target.value }))}
                 />
               </div>
-              <button className="secondary-btn" onClick={saveBodyMetrics}>Save metrics</button>
-              <div className="stack">
-                <div className="stat-row">
+              <button className="primary-btn metrics-save-btn" onClick={saveBodyMetrics}>
+                <span aria-hidden="true">⌁</span>
+                <span>Save metrics</span>
+              </button>
+              <div className="stack metric-summary-list">
+                <div className="stat-row metric-summary-row">
                   <span>Weight</span>
                   <strong>
                     {metricsPreview.recent && metricsPreview.previous
@@ -865,7 +876,7 @@ export default function App() {
                         : 'No entries yet'}
                   </strong>
                 </div>
-                <div className="stat-row">
+                <div className="stat-row metric-summary-row">
                   <span>Body Fat</span>
                   <strong>
                     {metricsPreview.recent && metricsPreview.previous
@@ -877,47 +888,34 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="panel">
-              <div className="section-title">Workout templates</div>
+            <div className="panel dashboard-panel templates-panel">
+              <div className="section-title section-title-with-icon">
+                <span className="section-icon" aria-hidden="true">⌘</span>
+                <span>Workout Templates</span>
+              </div>
               <div className="list">
                 {state.templates.map((template) => (
                   <div key={template.id} className="list-item template-item template-card">
-                    <button
-                      className="template-card-main"
-                      onClick={() => {
-                        setActiveSession(createWorkoutSession(template, state.exerciseHistory));
-                        setScreen('live');
-                      }}
-                    >
-                      <strong>{template.name}</strong>
-                      <span>{template.exercises.length} exercises</span>
-                    </button>
+                    <div className="template-card-summary">
+                      <button
+                        className="template-card-main"
+                        onClick={() => {
+                          setActiveSession(createWorkoutSession(template, state.exerciseHistory));
+                          setScreen('live');
+                        }}
+                      >
+                        <span className="template-card-icon" aria-hidden="true">▣</span>
+                        <span className="template-card-copy">
+                          <strong>{template.name}</strong>
+                          <span>{template.exercises.length} exercises</span>
+                        </span>
+                      </button>
+                    </div>
                     <div className="template-card-actions">
                       <button className="ghost-btn" onClick={() => startEditWorkout(template)}>Edit</button>
                       <button className="ghost-btn" onClick={() => duplicateWorkout(template)}>Duplicate</button>
-                      <button className="ghost-btn" onClick={() => deleteWorkout(template.id)}>Delete</button>
+                      <button className="ghost-btn danger-btn" onClick={() => deleteWorkout(template.id)}>Delete</button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="panel stack">
-              <div className="section-title">Muscle Groups</div>
-              <div className="exercise-row">
-                <input
-                  value={customMuscleDraft}
-                  onChange={(e) => setCustomMuscleDraft(e.target.value)}
-                  placeholder="Add custom muscle"
-                />
-                <button className="secondary-btn" onClick={addCustomMuscle} disabled={!customMuscleDraft.trim()}>
-                  Save muscle
-                </button>
-              </div>
-              <div className="stats-list">
-                {muscleOptions.map((muscle) => (
-                  <div key={muscle} className="stat-row">
-                    <span>{formatMuscleLabel(muscle)}</span>
-                    <strong>{DEFAULT_MUSCLES.includes(muscle as (typeof DEFAULT_MUSCLES)[number]) ? 'Built-in' : 'Custom'}</strong>
                   </div>
                 ))}
               </div>
@@ -1049,6 +1047,7 @@ export default function App() {
                             inputMode="numeric"
                             value={set.weight}
                             placeholder="185"
+                            onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) => updateLive(exerciseIndex, setIndex, { weight: e.target.value })}
                           />
                         </div>
@@ -1059,6 +1058,7 @@ export default function App() {
                             inputMode="numeric"
                             value={set.reps}
                             placeholder="8"
+                            onFocus={(e) => e.currentTarget.select()}
                             onChange={(e) => updateLive(exerciseIndex, setIndex, { reps: e.target.value })}
                           />
                         </div>
@@ -1122,6 +1122,22 @@ export default function App() {
 
         {screen === 'stats' && (
           <section className="stack">
+            <div className="panel stats-compact-panel">
+              <div className="section-title">Last 7 days</div>
+              <div className="stats-list">
+                {muscleOptions.map((muscle) => {
+                  const muscleKey = muscle as MuscleGroup;
+                  const count = muscleTotals[muscleKey] ?? 0;
+                  const bar = '█'.repeat(Math.max(1, Math.min(12, Math.round(count / 2))));
+                  return (
+                    <div key={muscleKey} className="stat-row">
+                      <span>{formatMuscleLabel(muscleKey)}</span>
+                      <strong>{bar} ({count})</strong>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <div className="panel stack stats-compact-panel">
               <div className="section-title">Progressive Overload</div>
               <div className="muscle-tabs muscle-tabs-vertical">
@@ -1166,22 +1182,6 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="panel stats-compact-panel">
-              <div className="section-title">Last 7 days</div>
-              <div className="stats-list">
-                {muscleOptions.map((muscle) => {
-                  const muscleKey = muscle as MuscleGroup;
-                  const count = muscleTotals[muscleKey] ?? 0;
-                  const bar = '█'.repeat(Math.max(1, Math.min(12, Math.round(count / 2))));
-                  return (
-                    <div key={muscleKey} className="stat-row">
-                      <span>{formatMuscleLabel(muscleKey)}</span>
-                      <strong>{bar} ({count})</strong>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
 
             <div className="panel stats-compact-panel">
               <div className="section-title">Recent workouts</div>
@@ -1220,6 +1220,27 @@ export default function App() {
               ) : (
                 <p className="muted">No body metrics recorded yet.</p>
               )}
+            </div>
+            <div className="panel stack stats-compact-panel">
+              <div className="section-title">Muscle Groups</div>
+              <div className="exercise-row">
+                <input
+                  value={customMuscleDraft}
+                  onChange={(e) => setCustomMuscleDraft(e.target.value)}
+                  placeholder="Add custom muscle"
+                />
+                <button className="secondary-btn" onClick={addCustomMuscle} disabled={!customMuscleDraft.trim()}>
+                  Save muscle
+                </button>
+              </div>
+              <div className="stats-list">
+                {muscleOptions.map((muscle) => (
+                  <div key={muscle} className="stat-row">
+                    <span>{formatMuscleLabel(muscle)}</span>
+                    <strong>{DEFAULT_MUSCLES.includes(muscle as (typeof DEFAULT_MUSCLES)[number]) ? 'Built-in' : 'Custom'}</strong>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <button className="secondary-btn" onClick={() => setScreen('dashboard')}>Back</button>
