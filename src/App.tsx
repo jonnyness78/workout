@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DEFAULT_MUSCLES,
+  deleteTemplateRecord,
+  formatMuscleLabel,
+  isSupabaseConfigured,
+  loadRemoteSnapshot,
+  normalizeMuscleName,
+  saveBodyMetricRecord,
+  saveMuscleRecord,
+  saveTemplateRecord,
+  saveWorkoutSessionRecord,
+  sortMuscleNames
+} from './supabase';
 
-type MuscleGroup =
-  | 'chest'
-  | 'back'
-  | 'shoulders'
-  | 'biceps'
-  | 'triceps'
-  | 'forearms'
-  | 'abs'
-  | 'quads'
-  | 'glutes'
-  | 'calves'
-  | 'other';
+type MuscleGroup = string;
 type Exercise = { id: string; name: string; muscle: MuscleGroup };
 type WorkoutTemplate = { id: string; name: string; exercises: Exercise[] };
 type LiveSet = { id: string; weight: string; reps: string; done: boolean };
@@ -41,9 +43,8 @@ type ExerciseSeed = { name: string; muscle: MuscleGroup };
 const STORAGE_KEY = 'lift-log-mvp';
 const LIVE_SESSION_KEY = 'lift-log-live-session';
 const METRICS_KEY = 'lift-log-body-metrics';
-const EXERCISE_HISTORY_KEY = 'lift-log-exercise-history';
+const MUSCLES_KEY = 'lift-log-muscles';
 const BASE_URL = import.meta.env.BASE_URL;
-const MUSCLES: Exclude<MuscleGroup, 'other'>[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'forearms', 'abs', 'quads', 'glutes', 'calves'];
 const DEFAULT_SET_COUNT = 3;
 
 const uid = () => crypto.randomUUID();
@@ -75,27 +76,6 @@ const blankWorkout = (): WorkoutTemplate => ({
   exercises: [{ id: uid(), name: '', muscle: 'chest' }]
 });
 
-function normalizeMuscle(muscle: string): MuscleGroup {
-  const value = muscle.toLowerCase();
-  if (
-    value === 'chest' ||
-    value === 'back' ||
-    value === 'shoulders' ||
-    value === 'biceps' ||
-    value === 'triceps' ||
-    value === 'forearms' ||
-    value === 'abs' ||
-    value === 'quads' ||
-    value === 'glutes' ||
-    value === 'calves'
-  ) {
-    return value;
-  }
-  if (value === 'arms') return 'biceps';
-  if (value === 'legs') return 'quads';
-  return 'other';
-}
-
 function readMetrics(): BodyMetricsEntry[] {
   try {
     const raw = localStorage.getItem(METRICS_KEY);
@@ -109,17 +89,36 @@ function saveMetrics(entries: BodyMetricsEntry[]) {
   localStorage.setItem(METRICS_KEY, JSON.stringify(entries));
 }
 
-function readExerciseHistory(): ExerciseHistoryEntry[] {
+function buildExerciseHistoryFromSessions(sessions: WorkoutSession[]) {
+  return sessions
+    .map((session) =>
+      session.exercises
+        .filter((exercise) => exercise.sets.length)
+        .map((exercise) => ({
+          key: historyKeyForExercise(exercise.name, exercise.muscle),
+          name: exercise.name,
+          muscle: normalizeMuscleName(exercise.muscle),
+          date: session.date,
+          sets: exercise.sets
+        }))
+    )
+    .flat()
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .filter((entry, index, all) => all.findIndex((candidate) => candidate.key === entry.key) === index);
+}
+
+function readMuscles() {
   try {
-    const raw = localStorage.getItem(EXERCISE_HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as ExerciseHistoryEntry[]) : [];
+    const raw = localStorage.getItem(MUSCLES_KEY);
+    if (!raw) return [...DEFAULT_MUSCLES];
+    return sortMuscleNames(JSON.parse(raw) as string[]);
   } catch {
-    return [];
+    return [...DEFAULT_MUSCLES];
   }
 }
 
-function saveExerciseHistory(entries: ExerciseHistoryEntry[]) {
-  localStorage.setItem(EXERCISE_HISTORY_KEY, JSON.stringify(entries));
+function saveMuscles(entries: string[]) {
+  localStorage.setItem(MUSCLES_KEY, JSON.stringify(sortMuscleNames(entries)));
 }
 
 function sessionVolume(session: WorkoutSession | LiveWorkout) {
@@ -160,32 +159,33 @@ function exerciseSummaryFromSets(sets: Array<{ weight: number; reps: number }>) 
 function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[]; exerciseHistory: ExerciseHistoryEntry[] } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const exerciseHistory = readExerciseHistory();
-    if (!raw) return { templates: defaultTemplates, sessions: [], exerciseHistory };
+    if (!raw) return { templates: defaultTemplates, sessions: [], exerciseHistory: [] };
     const parsed = JSON.parse(raw);
+    const sessions: WorkoutSession[] = Array.isArray(parsed.sessions)
+      ? parsed.sessions.map((session: WorkoutSession) => ({
+          ...session,
+          exercises: session.exercises.map((exercise) => ({
+            ...exercise,
+            muscle: normalizeMuscleName(exercise.muscle)
+          }))
+        }))
+      : [];
+    const exerciseHistory: ExerciseHistoryEntry[] = Array.isArray(parsed.exerciseHistory)
+      ? parsed.exerciseHistory.map((entry: ExerciseHistoryEntry) => ({
+          ...entry,
+          muscle: normalizeMuscleName(entry.muscle),
+          key: historyKeyForExercise(entry.name, normalizeMuscleName(entry.muscle))
+        }))
+      : buildExerciseHistoryFromSessions(sessions);
     return {
       templates: Array.isArray(parsed.templates) && parsed.templates.length
         ? parsed.templates.map((template: WorkoutTemplate) => ({
             ...template,
-            exercises: template.exercises.map((exercise) => ({ ...exercise, muscle: normalizeMuscle(exercise.muscle) }))
+            exercises: template.exercises.map((exercise) => ({ ...exercise, muscle: normalizeMuscleName(exercise.muscle) }))
           }))
         : defaultTemplates,
-      sessions: Array.isArray(parsed.sessions)
-        ? parsed.sessions.map((session: WorkoutSession) => ({
-            ...session,
-            exercises: session.exercises.map((exercise) => ({
-              ...exercise,
-              muscle: normalizeMuscle(exercise.muscle)
-            }))
-          }))
-        : [],
-      exerciseHistory: exerciseHistory.length
-        ? exerciseHistory.map((entry) => ({
-            ...entry,
-            muscle: normalizeMuscle(entry.muscle),
-            key: historyKeyForExercise(entry.name, normalizeMuscle(entry.muscle))
-          }))
-        : []
+      sessions,
+      exerciseHistory
     };
   } catch {
     return { templates: defaultTemplates, sessions: [], exerciseHistory: [] };
@@ -213,7 +213,7 @@ function getLastExerciseSets(exerciseName: string, muscle: MuscleGroup, history:
   const byExerciseName = [...history].reverse().find((entry) => normalizeExerciseKey(entry.name) === normalizeExerciseKey(exerciseName));
   if (byExerciseName) return byExerciseName.sets;
 
-  const byMuscle = [...history].reverse().find((entry) => entry.muscle === muscle);
+  const byMuscle = [...history].reverse().find((entry) => normalizeMuscleName(entry.muscle) === normalizeMuscleName(muscle));
   return byMuscle?.sets ?? [];
 }
 
@@ -257,9 +257,15 @@ function createWorkoutSession(template: WorkoutTemplate, history: ExerciseHistor
   };
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return 'Unknown error';
+}
+
 export default function App() {
   const [state, setState] = useState(readState);
   const [screen, setScreen] = useState<'dashboard' | 'create' | 'live' | 'stats'>('dashboard');
+  const [muscles, setMuscles] = useState<string[]>(() => readMuscles());
   const [selectedMuscle, setSelectedMuscle] = useState<MuscleGroup>('quads');
   const [draft, setDraft] = useState<WorkoutTemplate>(blankWorkout);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
@@ -267,12 +273,17 @@ export default function App() {
   const [liveExistingExerciseName, setLiveExistingExerciseName] = useState('');
   const [liveNewExerciseName, setLiveNewExerciseName] = useState('');
   const [liveNewExerciseMuscle, setLiveNewExerciseMuscle] = useState<MuscleGroup>('chest');
+  const [customMuscleDraft, setCustomMuscleDraft] = useState('');
   const [activeSession, setActiveSession] = useState<LiveWorkout | null>(() => readLiveSession());
   const [metrics, setMetrics] = useState<BodyMetricsEntry[]>(() => readMetrics());
   const [metricDraft, setMetricDraft] = useState({ weight: '', bodyFat: '' });
-  const [lastWorkoutVolume, setLastWorkoutVolume] = useState<number | null>(null);
   const [restUntil, setRestUntil] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [syncMessage, setSyncMessage] = useState(
+    isSupabaseConfigured
+      ? 'Connecting to Supabase...'
+      : 'Local mode only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to sync with Supabase.'
+  );
   const liveAddSectionRef = useRef<HTMLDivElement | null>(null);
   const appCardRef = useRef<HTMLElement | null>(null);
   const timerPrevRef = useRef<number>(0);
@@ -283,8 +294,8 @@ export default function App() {
   }, [state]);
 
   useEffect(() => {
-    saveExerciseHistory(state.exerciseHistory);
-  }, [state.exerciseHistory, state.templates]);
+    saveMuscles(muscles);
+  }, [muscles]);
 
   useEffect(() => {
     if (activeSession) localStorage.setItem(LIVE_SESSION_KEY, JSON.stringify(activeSession));
@@ -316,6 +327,33 @@ export default function App() {
     saveMetrics(metrics);
   }, [metrics]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!isSupabaseConfigured) return () => undefined;
+
+    void (async () => {
+      try {
+        const snapshot = await loadRemoteSnapshot();
+        if (cancelled) return;
+        setState({
+          templates: snapshot.templates,
+          sessions: snapshot.sessions,
+          exerciseHistory: buildExerciseHistoryFromSessions(snapshot.sessions)
+        });
+        setMetrics(snapshot.metrics);
+        setMuscles(snapshot.muscles);
+        setSyncMessage('Supabase connected.');
+      } catch (error) {
+        if (cancelled) return;
+        setSyncMessage(`Supabase sync failed: ${getErrorMessage(error)}`);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const recentSessions = useMemo(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return state.sessions.filter((session) => new Date(session.date).getTime() >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
@@ -326,25 +364,26 @@ export default function App() {
     [recentSessions]
   );
 
+  const muscleOptions = useMemo(() => {
+    const inUse = [
+      ...muscles,
+      ...state.templates.flatMap((template) => template.exercises.map((exercise) => exercise.muscle)),
+      ...state.sessions.flatMap((session) => session.exercises.map((exercise) => exercise.muscle)),
+      ...state.exerciseHistory.map((entry) => entry.muscle),
+      ...(activeSession?.exercises.map((exercise) => exercise.muscle) ?? [])
+    ];
+    return sortMuscleNames(inUse);
+  }, [activeSession, muscles, state.exerciseHistory, state.sessions, state.templates]);
+
   const muscleTotals = useMemo(() => {
-    const totals: Record<MuscleGroup, number> = {
-      chest: 0,
-      back: 0,
-      shoulders: 0,
-      biceps: 0,
-      triceps: 0,
-      forearms: 0,
-      abs: 0,
-      quads: 0,
-      glutes: 0,
-      calves: 0,
-      other: 0
-    };
+    const totals: Record<MuscleGroup, number> = Object.fromEntries(muscleOptions.map((muscle) => [muscle, 0]));
     for (const session of recentSessions) {
-      for (const exercise of session.exercises) totals[exercise.muscle] += exercise.sets.length;
+      for (const exercise of session.exercises) {
+        totals[exercise.muscle] = (totals[exercise.muscle] ?? 0) + exercise.sets.length;
+      }
     }
     return totals;
-  }, [recentSessions]);
+  }, [muscleOptions, recentSessions]);
 
   const metricsPreview = useMemo(() => {
     const recent = metrics[0];
@@ -352,9 +391,9 @@ export default function App() {
     return { recent, previous };
   }, [metrics]);
 
-  const previousWorkoutVolume = useMemo(() => {
-    const previousSession = state.sessions[1];
-    return previousSession ? sessionVolume(previousSession) : null;
+  const latestWorkoutVolume = useMemo(() => {
+    const latestSession = state.sessions[0];
+    return latestSession ? sessionVolume(latestSession) : null;
   }, [state.sessions]);
 
   const muscleProgression = useMemo(() => {
@@ -403,6 +442,11 @@ export default function App() {
     return [...library.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [state.exerciseHistory, state.templates]);
 
+  useEffect(() => {
+    if (!muscleOptions.length) return;
+    if (!muscleOptions.includes(selectedMuscle)) setSelectedMuscle(muscleOptions[0]);
+  }, [muscleOptions, selectedMuscle]);
+
   const saveDraftExercise = (index: number, patch: Partial<Exercise>) => {
     setDraft((current) => {
       const exercises = current.exercises.slice();
@@ -414,7 +458,7 @@ export default function App() {
   const addExercise = () => {
     setDraft((current) => ({
       ...current,
-      exercises: [...current.exercises, { id: uid(), name: '', muscle: 'chest' }]
+      exercises: [...current.exercises, { id: uid(), name: '', muscle: muscleOptions[0] ?? 'chest' }]
     }));
   };
 
@@ -433,6 +477,30 @@ export default function App() {
       exercises: [...current.exercises, { id: uid(), name: selected.name, muscle: selected.muscle }]
     }));
     setExistingExerciseName('');
+  };
+
+  const addCustomMuscle = async () => {
+    const normalized = normalizeMuscleName(customMuscleDraft);
+    if (!normalized) return;
+    if (muscleOptions.includes(normalized)) {
+      setCustomMuscleDraft('');
+      setSelectedMuscle(normalized);
+      setLiveNewExerciseMuscle(normalized);
+      return;
+    }
+
+    setMuscles((current) => sortMuscleNames([...current, normalized]));
+    setCustomMuscleDraft('');
+    setSelectedMuscle(normalized);
+    setLiveNewExerciseMuscle(normalized);
+
+    if (!isSupabaseConfigured) return;
+    try {
+      await saveMuscleRecord(normalized);
+      setSyncMessage(`Saved custom muscle "${formatMuscleLabel(normalized)}" to Supabase.`);
+    } catch (error) {
+      setSyncMessage(`Could not save custom muscle: ${getErrorMessage(error)}`);
+    }
   };
 
   const startCreateWorkout = () => {
@@ -460,9 +528,16 @@ export default function App() {
     setScreen('create');
   };
 
-  const deleteWorkout = (templateId: string) => {
+  const deleteWorkout = async (templateId: string) => {
     if (!window.confirm('Delete this workout template?')) return;
     setState((current) => ({ ...current, templates: current.templates.filter((template) => template.id !== templateId) }));
+    if (!isSupabaseConfigured) return;
+    try {
+      await deleteTemplateRecord(templateId);
+      setSyncMessage('Deleted workout template from Supabase.');
+    } catch (error) {
+      setSyncMessage(`Could not delete template in Supabase: ${getErrorMessage(error)}`);
+    }
   };
 
   const addExerciseToLiveWorkout = (seed: ExerciseSeed) => {
@@ -481,9 +556,9 @@ export default function App() {
 
   const addNewExerciseToLive = () => {
     if (!liveNewExerciseName.trim()) return;
-    addExerciseToLiveWorkout({ name: liveNewExerciseName.trim(), muscle: liveNewExerciseMuscle });
+    addExerciseToLiveWorkout({ name: liveNewExerciseName.trim(), muscle: normalizeMuscleName(liveNewExerciseMuscle) });
     setLiveNewExerciseName('');
-    setLiveNewExerciseMuscle('chest');
+    setLiveNewExerciseMuscle(muscleOptions[0] ?? 'chest');
   };
 
   const moveExercise = (exerciseIndex: number, direction: -1 | 1) => {
@@ -534,29 +609,58 @@ export default function App() {
     }
   };
 
-  const saveBodyMetrics = () => {
+  const saveBodyMetrics = async () => {
     const weight = Number(metricDraft.weight);
     const bodyFat = Number(metricDraft.bodyFat);
     if (!Number.isFinite(weight) || !Number.isFinite(bodyFat)) return;
-    setMetrics((current) => [{ date: new Date().toISOString(), weight, bodyFat }, ...current].slice(0, 100));
+    const entry = { date: new Date().toISOString(), weight, bodyFat };
+    setMetrics((current) => [entry, ...current].slice(0, 100));
     setMetricDraft({ weight: '', bodyFat: '' });
+
+    if (!isSupabaseConfigured) return;
+    try {
+      await saveBodyMetricRecord(entry);
+      setSyncMessage('Saved body metrics to Supabase.');
+    } catch (error) {
+      setSyncMessage(`Could not save body metrics: ${getErrorMessage(error)}`);
+    }
   };
 
-  const saveTemplate = () => {
+  const saveTemplate = async () => {
     if (!draft.name.trim() || !draft.exercises.some((exercise) => exercise.name.trim())) return;
+    const cleanedTemplate: WorkoutTemplate = {
+      ...structuredClone(draft),
+      exercises: draft.exercises
+        .filter((exercise) => exercise.name.trim())
+        .map((exercise) => ({
+          ...exercise,
+          name: exercise.name.trim(),
+          muscle: normalizeMuscleName(exercise.muscle)
+        }))
+    };
+
     setState((current) => {
       if (editingTemplateId) {
         return {
           ...current,
-          templates: current.templates.map((template) => (template.id === editingTemplateId ? structuredClone(draft) : template))
+          templates: current.templates.map((template) => (template.id === editingTemplateId ? cleanedTemplate : template))
         };
       }
-      return { ...current, templates: [structuredClone(draft), ...current.templates] };
+      return { ...current, templates: [cleanedTemplate, ...current.templates] };
     });
+    setMuscles((current) => sortMuscleNames([...current, ...cleanedTemplate.exercises.map((exercise) => exercise.muscle)]));
     setDraft(blankWorkout());
     setEditingTemplateId(null);
     setExistingExerciseName('');
     setScreen('dashboard');
+
+    if (!isSupabaseConfigured) return;
+    try {
+      await saveTemplateRecord(cleanedTemplate);
+      setSyncMessage('Saved workout template to Supabase.');
+    } catch (error) {
+      setSyncMessage(`Could not save template: ${getErrorMessage(error)}`);
+    }
   };
 
   const updateLive = (exerciseIndex: number, setIndex: number, patch: Partial<LiveSet>) => {
@@ -639,7 +743,7 @@ export default function App() {
     });
   };
 
-  const finishWorkout = () => {
+  const finishWorkout = async () => {
     if (!activeSession) return;
     const finishedAt = new Date().toISOString();
     const finished: WorkoutSession = {
@@ -662,7 +766,7 @@ export default function App() {
       .map((exercise) => ({
         key: historyKeyForExercise(exercise.name, exercise.muscle),
         name: exercise.name,
-        muscle: exercise.muscle,
+        muscle: normalizeMuscleName(exercise.muscle),
         date: finishedAt,
         sets: exercise.sets
           .filter((set) => set.weight !== '' || set.reps !== '')
@@ -675,11 +779,19 @@ export default function App() {
       );
       return { ...current, sessions: [finished, ...current.sessions].slice(0, 100), exerciseHistory: dedupedHistory.slice(0, 500) };
     });
-    const totalVolume = sessionVolume(finished);
-    setLastWorkoutVolume(totalVolume);
     setActiveSession(null);
     setRestUntil(null);
     setScreen('dashboard');
+
+    setMuscles((current) => sortMuscleNames([...current, ...finished.exercises.map((exercise) => exercise.muscle)]));
+
+    if (!isSupabaseConfigured) return;
+    try {
+      await saveWorkoutSessionRecord(finished);
+      setSyncMessage('Saved finished workout to Supabase.');
+    } catch (error) {
+      setSyncMessage(`Could not save finished workout: ${getErrorMessage(error)}`);
+    }
   };
 
   const timerLeft = restUntil ? Math.max(0, Math.ceil((restUntil - now) / 1000)) : 0;
@@ -699,6 +811,7 @@ export default function App() {
             <div>
               <p className="eyebrow">Lift Log</p>
               <h1>Fast weightlifting tracker</h1>
+              <p className="muted">{syncMessage}</p>
             </div>
             <button className="ghost-btn" onClick={() => setScreen('stats')}>Stats</button>
           </header>
@@ -718,7 +831,7 @@ export default function App() {
               <div className="stat-row">
                 <span>Last Workout</span>
                 <strong>
-                  {lastWorkoutVolume !== null ? `${lastWorkoutVolume.toLocaleString()} lbs` : 'No workouts yet'}
+                  {latestWorkoutVolume !== null ? `${latestWorkoutVolume.toLocaleString()} lbs` : 'No workouts yet'}
                 </strong>
               </div>
             </div>
@@ -788,6 +901,27 @@ export default function App() {
                 ))}
               </div>
             </div>
+            <div className="panel stack">
+              <div className="section-title">Muscle Groups</div>
+              <div className="exercise-row">
+                <input
+                  value={customMuscleDraft}
+                  onChange={(e) => setCustomMuscleDraft(e.target.value)}
+                  placeholder="Add custom muscle"
+                />
+                <button className="secondary-btn" onClick={addCustomMuscle} disabled={!customMuscleDraft.trim()}>
+                  Save muscle
+                </button>
+              </div>
+              <div className="stats-list">
+                {muscleOptions.map((muscle) => (
+                  <div key={muscle} className="stat-row">
+                    <span>{formatMuscleLabel(muscle)}</span>
+                    <strong>{DEFAULT_MUSCLES.includes(muscle as (typeof DEFAULT_MUSCLES)[number]) ? 'Built-in' : 'Custom'}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
           </section>
         )}
 
@@ -812,7 +946,7 @@ export default function App() {
                   <option value="">Add existing exercise</option>
                   {exerciseLibrary.map((entry) => (
                     <option key={entry.key} value={entry.key}>
-                      {entry.name} ({entry.muscle})
+                      {entry.name} ({formatMuscleLabel(entry.muscle)})
                     </option>
                   ))}
                 </select>
@@ -831,8 +965,8 @@ export default function App() {
                     value={exercise.muscle}
                     onChange={(e) => saveDraftExercise(index, { muscle: e.target.value as MuscleGroup })}
                   >
-                    {[...MUSCLES, 'other'].map((muscle) => (
-                      <option key={muscle} value={muscle}>{muscle}</option>
+                    {muscleOptions.map((muscle) => (
+                      <option key={muscle} value={muscle}>{formatMuscleLabel(muscle)}</option>
                     ))}
                   </select>
                   <button
@@ -887,7 +1021,7 @@ export default function App() {
                 <div className="exercise-head">
                   <div>
                     <h2>{exercise.name}</h2>
-                    <p>{exercise.muscle}</p>
+                    <p>{formatMuscleLabel(exercise.muscle)}</p>
                     <p className="last-session">
                       {getPreviousExerciseSummary(exercise.name, exercise.muscle, state.exerciseHistory) || 'No previous session'}
                     </p>
@@ -954,7 +1088,7 @@ export default function App() {
                   <option value="">Add existing exercise</option>
                   {exerciseLibrary.map((entry) => (
                     <option key={entry.key} value={entry.key}>
-                      {entry.name} ({entry.muscle})
+                      {entry.name} ({formatMuscleLabel(entry.muscle)})
                     </option>
                   ))}
                 </select>
@@ -972,8 +1106,8 @@ export default function App() {
                   value={liveNewExerciseMuscle}
                   onChange={(e) => setLiveNewExerciseMuscle(e.target.value as MuscleGroup)}
                 >
-                  {[...MUSCLES, 'other'].map((muscle) => (
-                    <option key={muscle} value={muscle}>{muscle}</option>
+                  {muscleOptions.map((muscle) => (
+                    <option key={muscle} value={muscle}>{formatMuscleLabel(muscle)}</option>
                   ))}
                 </select>
                 <button className="secondary-btn" onClick={addNewExerciseToLive} disabled={!liveNewExerciseName.trim()}>
@@ -991,7 +1125,7 @@ export default function App() {
             <div className="panel stack stats-compact-panel">
               <div className="section-title">Progressive Overload</div>
               <div className="muscle-tabs muscle-tabs-vertical">
-                {[...MUSCLES, 'other'].map((muscle) => {
+                {muscleOptions.map((muscle) => {
                   const key = muscle as MuscleGroup;
                   return (
                     <button
@@ -999,13 +1133,13 @@ export default function App() {
                       className={selectedMuscle === key ? 'muscle-tab muscle-tab-active' : 'muscle-tab'}
                       onClick={() => setSelectedMuscle(key)}
                     >
-                      {key.charAt(0).toUpperCase() + key.slice(1)}
+                      {formatMuscleLabel(key)}
                     </button>
                   );
                 })}
               </div>
               <div className="stat-row">
-                <span>{selectedMuscle} this week</span>
+                <span>{formatMuscleLabel(selectedMuscle)} this week</span>
                 <strong>
                   {muscleProgression.reduce((total, entry) => total + entry.volume, 0).toLocaleString()} lbs
                 </strong>
@@ -1035,13 +1169,13 @@ export default function App() {
             <div className="panel stats-compact-panel">
               <div className="section-title">Last 7 days</div>
               <div className="stats-list">
-                {[...MUSCLES, 'other'].map((muscle) => {
+                {muscleOptions.map((muscle) => {
                   const muscleKey = muscle as MuscleGroup;
-                  const count = muscleTotals[muscleKey];
+                  const count = muscleTotals[muscleKey] ?? 0;
                   const bar = '█'.repeat(Math.max(1, Math.min(12, Math.round(count / 2))));
                   return (
                     <div key={muscleKey} className="stat-row">
-                      <span>{muscleKey.charAt(0).toUpperCase() + muscleKey.slice(1)}</span>
+                      <span>{formatMuscleLabel(muscleKey)}</span>
                       <strong>{bar} ({count})</strong>
                     </div>
                   );
