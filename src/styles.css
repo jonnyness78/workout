@@ -31,7 +31,10 @@ button, input, select { font: inherit; }
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.app-card::-webkit-scrollbar { display: none; }
 
 .topbar, .exercise-head, .exercise-row, .set-row, .actions, .stat-row, .bottom-nav { display: flex; gap: 10px; align-items: center; }
 .topbar, .exercise-head, .actions, .stat-row { justify-content: space-between; }
