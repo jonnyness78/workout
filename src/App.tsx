@@ -335,14 +335,21 @@ export default function App() {
       try {
         const snapshot = await loadRemoteSnapshot();
         if (cancelled) return;
+        const templates = snapshot.templates.length ? snapshot.templates : defaultTemplates;
         setState({
-          templates: snapshot.templates,
+          templates,
           sessions: snapshot.sessions,
           exerciseHistory: buildExerciseHistoryFromSessions(snapshot.sessions)
         });
         setMetrics(snapshot.metrics);
         setMuscles(snapshot.muscles);
         setSyncMessage('Supabase connected.');
+        if (!snapshot.templates.length) {
+          void Promise.all(defaultTemplates.map((template) => saveTemplateRecord(template))).catch((error) => {
+            if (cancelled) return;
+            setSyncMessage(`Could not seed starter workouts: ${getErrorMessage(error)}`);
+          });
+        }
       } catch (error) {
         if (cancelled) return;
         setSyncMessage(`Supabase sync failed: ${getErrorMessage(error)}`);
@@ -794,6 +801,18 @@ export default function App() {
     }
   };
 
+  const cancelWorkout = () => {
+    if (!activeSession) return;
+    if (!window.confirm('Cancel this workout and discard all progress?')) return;
+    setActiveSession(null);
+    setRestUntil(null);
+    setLiveExistingExerciseName('');
+    setLiveNewExerciseName('');
+    setLiveNewExerciseMuscle(muscleOptions[0] ?? 'chest');
+    setScreen('dashboard');
+    setSyncMessage('Workout cancelled.');
+  };
+
   const timerLeft = restUntil ? Math.max(0, Math.ceil((restUntil - now) / 1000)) : 0;
 
   useEffect(() => {
@@ -1116,7 +1135,12 @@ export default function App() {
               </div>
             </div>
 
-            <button className="primary-btn big" onClick={finishWorkout}>Finish Workout</button>
+            <div className="live-workout-actions">
+              <button className="secondary-btn big danger-btn" onClick={cancelWorkout}>
+                Cancel Workout
+              </button>
+              <button className="primary-btn big" onClick={finishWorkout}>Finish Workout</button>
+            </div>
           </section>
         )}
 

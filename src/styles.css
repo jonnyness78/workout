@@ -258,6 +258,14 @@ h2 { font-size: 18px; }
   gap: 12px;
 }
 .metrics-save-btn { min-height: 56px; font-size: 16px; }
+.live-workout-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 10px;
+}
+.live-workout-actions .big {
+  width: 100%;
+}
 .create-new-btn { width: 100%; }
 .set-complete-btn { transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease, opacity 0.2s ease; }
 .set-complete-btn-done { background: #dbeafe; color: #1e3a8a; }
