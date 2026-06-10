@@ -155,6 +155,13 @@ async function selectAll<T>(table: string, columns: string, clientId: string, or
   return (data ?? []) as T[];
 }
 
+async function selectAllShared<T>(table: string, columns: string, orderColumn: string, ascending = true) {
+  const client = invariantClient();
+  const { data, error } = await client.from(table).select(columns).order(orderColumn, { ascending });
+  if (error) throw error;
+  return (data ?? []) as T[];
+}
+
 export async function ensureDefaultMuscles() {
   const client = invariantClient();
   const clientId = getClientId();
@@ -168,14 +175,23 @@ export async function ensureDefaultMuscles() {
   if (error) throw error;
 }
 
-export async function loadRemoteSnapshot(): Promise<RemoteSnapshot> {
+export async function loadRemoteSnapshot(options: { scope?: 'client' | 'shared' } = {}): Promise<RemoteSnapshot> {
+  const scope = options.scope ?? 'client';
   const clientId = getClientId();
 
   const [muscleRows, templateRows, metricRows, sessionRows] = await Promise.all([
-    selectAll<MuscleRow>('muscles', 'id, client_id, slug, name, is_custom, created_at', clientId, 'created_at'),
-    selectAll<TemplateRow>('workout_templates', 'id, client_id, name, created_at, updated_at', clientId, 'updated_at', false),
-    selectAll<BodyMetricRow>('body_metrics', 'id, client_id, recorded_at, weight, body_fat', clientId, 'recorded_at', false),
-    selectAll<SessionRow>('workout_sessions', 'id, client_id, performed_at, template_id, template_name, created_at', clientId, 'performed_at', false)
+    scope === 'shared'
+      ? selectAllShared<MuscleRow>('muscles', 'id, client_id, slug, name, is_custom, created_at', 'created_at')
+      : selectAll<MuscleRow>('muscles', 'id, client_id, slug, name, is_custom, created_at', clientId, 'created_at'),
+    scope === 'shared'
+      ? selectAllShared<TemplateRow>('workout_templates', 'id, client_id, name, created_at, updated_at', 'updated_at', false)
+      : selectAll<TemplateRow>('workout_templates', 'id, client_id, name, created_at, updated_at', clientId, 'updated_at', false),
+    scope === 'shared'
+      ? selectAllShared<BodyMetricRow>('body_metrics', 'id, client_id, recorded_at, weight, body_fat', 'recorded_at', false)
+      : selectAll<BodyMetricRow>('body_metrics', 'id, client_id, recorded_at, weight, body_fat', clientId, 'recorded_at', false),
+    scope === 'shared'
+      ? selectAllShared<SessionRow>('workout_sessions', 'id, client_id, performed_at, template_id, template_name, created_at', 'performed_at', false)
+      : selectAll<SessionRow>('workout_sessions', 'id, client_id, performed_at, template_id, template_name, created_at', clientId, 'performed_at', false)
   ]);
 
   const client = invariantClient();
@@ -184,20 +200,32 @@ export async function loadRemoteSnapshot(): Promise<RemoteSnapshot> {
 
   const [templateExerciseRows, sessionExerciseRows] = await Promise.all([
     templateIds.length
-      ? client
-          .from('template_exercises')
-          .select('id, template_id, client_id, exercise_name, muscle_name, sort_order')
-          .eq('client_id', clientId)
-          .in('template_id', templateIds)
-          .order('sort_order', { ascending: true })
+      ? scope === 'shared'
+        ? client
+            .from('template_exercises')
+            .select('id, template_id, client_id, exercise_name, muscle_name, sort_order')
+            .in('template_id', templateIds)
+            .order('sort_order', { ascending: true })
+        : client
+            .from('template_exercises')
+            .select('id, template_id, client_id, exercise_name, muscle_name, sort_order')
+            .eq('client_id', clientId)
+            .in('template_id', templateIds)
+            .order('sort_order', { ascending: true })
       : Promise.resolve({ data: [], error: null }),
     sessionIds.length
-      ? client
-          .from('session_exercises')
-          .select('id, session_id, client_id, exercise_name, muscle_name, sort_order')
-          .eq('client_id', clientId)
-          .in('session_id', sessionIds)
-          .order('sort_order', { ascending: true })
+      ? scope === 'shared'
+        ? client
+            .from('session_exercises')
+            .select('id, session_id, client_id, exercise_name, muscle_name, sort_order')
+            .in('session_id', sessionIds)
+            .order('sort_order', { ascending: true })
+        : client
+            .from('session_exercises')
+            .select('id, session_id, client_id, exercise_name, muscle_name, sort_order')
+            .eq('client_id', clientId)
+            .in('session_id', sessionIds)
+            .order('sort_order', { ascending: true })
       : Promise.resolve({ data: [], error: null })
   ]);
 
@@ -206,12 +234,18 @@ export async function loadRemoteSnapshot(): Promise<RemoteSnapshot> {
 
   const sessionExerciseIds = (sessionExerciseRows.data ?? []).map((row) => row.id);
   const sessionSetRows = sessionExerciseIds.length
-    ? await client
-        .from('session_sets')
-        .select('id, session_exercise_id, client_id, weight, reps, set_order')
-        .eq('client_id', clientId)
-        .in('session_exercise_id', sessionExerciseIds)
-        .order('set_order', { ascending: true })
+    ? scope === 'shared'
+      ? await client
+          .from('session_sets')
+          .select('id, session_exercise_id, client_id, weight, reps, set_order')
+          .in('session_exercise_id', sessionExerciseIds)
+          .order('set_order', { ascending: true })
+      : await client
+          .from('session_sets')
+          .select('id, session_exercise_id, client_id, weight, reps, set_order')
+          .eq('client_id', clientId)
+          .in('session_exercise_id', sessionExerciseIds)
+          .order('set_order', { ascending: true })
     : { data: [], error: null };
 
   if (sessionSetRows.error) throw sessionSetRows.error;

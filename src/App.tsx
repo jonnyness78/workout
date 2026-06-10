@@ -364,7 +364,7 @@ export default function App() {
 
     try {
       const snapshot = await withTimeout(
-        loadRemoteSnapshot(),
+        loadRemoteSnapshot({ scope: mode === 'manual' ? 'shared' : 'client' }),
         SYNC_TIMEOUT_MS,
         'Sync timed out after 10 seconds.'
       );
@@ -378,7 +378,7 @@ export default function App() {
       });
       setMetrics(snapshot.metrics);
       setMuscles(snapshot.muscles);
-      setSyncMessage(mode === 'manual' ? 'Synced from Supabase.' : 'Supabase connected.');
+      setSyncMessage(mode === 'manual' ? 'Synced shared Supabase data.' : 'Supabase connected.');
 
       if (!snapshot.templates.length) {
         void Promise.all(defaultTemplates.map((template) => saveTemplateRecord(template))).catch((error) => {
