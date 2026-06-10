@@ -40,6 +40,13 @@ button, input, select { font: inherit; }
 .topbar, .exercise-head, .actions, .stat-row { justify-content: space-between; }
 .topbar { align-items: flex-start; margin-bottom: 6px; }
 .topbar-copy { display: grid; gap: 10px; }
+.topbar-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .stack { display: grid; gap: 18px; }
 .dashboard-stack { gap: 20px; }
 .eyebrow { margin: 0; text-transform: uppercase; letter-spacing: 0.14em; color: var(--teal); font-size: 16px; }
@@ -115,6 +122,25 @@ h2 { font-size: 18px; }
   gap: 12px;
   font-size: 17px;
   font-weight: 500;
+}
+.topbar-sync-btn {
+  min-width: 86px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 20px;
+  color: var(--teal-dark);
+  border-color: rgba(47, 166, 165, 0.45);
+  background: rgba(233, 247, 244, 0.95);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.topbar-sync-btn:disabled {
+  opacity: 0.7;
 }
 .template-item {
   display: grid;
@@ -412,6 +438,12 @@ h2 { font-size: 18px; }
     min-width: 104px;
     min-height: 52px;
     font-size: 15px;
+  }
+  .topbar-sync-btn {
+    min-width: 86px;
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 13px;
   }
   h1 { font-size: 26px; }
   .eyebrow { font-size: 14px; }
