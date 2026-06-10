@@ -222,6 +222,10 @@ function formatDate(date: string) {
   return new Date(date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function normalizeTemplateKey(name: string) {
+  return name.trim().toLowerCase();
+}
+
 function getLastExerciseSets(exerciseName: string, muscle: MuscleGroup, history: ExerciseHistoryEntry[]) {
   const target = historyKeyForExercise(exerciseName, muscle);
   const byName = [...history].reverse().find((entry) => entry.key === target);
@@ -461,6 +465,23 @@ export default function App() {
     const [current, previous] = muscleProgression;
     return { current, previous };
   }, [muscleProgression]);
+
+  const templateLastDoneDates = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byName = new Map<string, string>();
+    [...state.sessions]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .forEach((session) => {
+        if (session.templateId && !byId.has(session.templateId)) {
+          byId.set(session.templateId, session.date);
+        }
+        const nameKey = normalizeTemplateKey(session.templateName);
+        if (!byName.has(nameKey)) {
+          byName.set(nameKey, session.date);
+        }
+      });
+    return { byId, byName };
+  }, [state.sessions]);
 
   const exerciseLibrary = useMemo(() => {
     const library = new Map<string, ExerciseHistoryEntry>();
@@ -863,7 +884,9 @@ export default function App() {
         {screen !== 'live' && (
           <header className="topbar">
             <div className="topbar-copy">
-              <h1>Lift Log</h1>
+              <button type="button" className="topbar-title-link" onClick={() => setScreen('dashboard')}>
+                Lift Log
+              </button>
               <p className="muted status-note">
                 <span className="status-badge" aria-hidden="true">✓</span>
                 <span>{syncMessage}</span>
@@ -968,6 +991,15 @@ export default function App() {
                         <span className="template-card-copy">
                           <strong>{template.name}</strong>
                           <span>{template.exercises.length} exercises</span>
+                          <span className="template-card-last-done">
+                            {templateLastDoneDates.byId.get(template.id) || templateLastDoneDates.byName.get(normalizeTemplateKey(template.name))
+                              ? `Last done ${formatDate(
+                                  templateLastDoneDates.byId.get(template.id) ||
+                                    templateLastDoneDates.byName.get(normalizeTemplateKey(template.name)) ||
+                                    ''
+                                )}`
+                              : 'Never done'}
+                          </span>
                         </span>
                       </button>
                     </div>

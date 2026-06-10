@@ -40,12 +40,24 @@ button, input, select { font: inherit; }
 .topbar, .exercise-head, .actions, .stat-row { justify-content: space-between; }
 .topbar { align-items: flex-start; margin-bottom: 6px; }
 .topbar-copy { display: grid; gap: 10px; }
+.topbar-title-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 30px;
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  max-width: 9ch;
+  text-align: left;
+  cursor: pointer;
+}
 .topbar-actions {
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .stack { display: grid; gap: 18px; }
 .dashboard-stack { gap: 20px; }
@@ -168,6 +180,12 @@ h2 { font-size: 18px; }
 .template-card-copy {
   display: grid;
   gap: 4px;
+}
+.template-card-last-done {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
 }
 .template-item strong {
   display: block;
@@ -440,12 +458,14 @@ h2 { font-size: 18px; }
     font-size: 15px;
   }
   .topbar-sync-btn {
-    min-width: 86px;
+    min-width: 80px;
     min-height: 38px;
     padding: 0 10px;
     font-size: 13px;
   }
-  h1 { font-size: 26px; }
+  .topbar-title-link {
+    font-size: 26px;
+  }
   .eyebrow { font-size: 14px; }
   .muscle-tab { min-height: 34px; padding: 7px 10px; }
   .exercise-head { gap: 8px; }
