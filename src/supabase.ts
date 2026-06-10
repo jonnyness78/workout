@@ -169,7 +169,6 @@ export async function ensureDefaultMuscles() {
 }
 
 export async function loadRemoteSnapshot(): Promise<RemoteSnapshot> {
-  await ensureDefaultMuscles();
   const clientId = getClientId();
 
   const [muscleRows, templateRows, metricRows, sessionRows] = await Promise.all([

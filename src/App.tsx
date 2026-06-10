@@ -46,6 +46,7 @@ const METRICS_KEY = 'lift-log-body-metrics';
 const MUSCLES_KEY = 'lift-log-muscles';
 const BASE_URL = import.meta.env.BASE_URL;
 const DEFAULT_SET_COUNT = 3;
+const SYNC_TIMEOUT_MS = 10_000;
 
 const uid = () => crypto.randomUUID();
 
@@ -154,6 +155,22 @@ function exerciseSummaryFromSets(sets: Array<{ weight: number; reps: number }>) 
   if (!sets.length) return null;
   const last = sets[sets.length - 1];
   return { weight: last.weight, reps: last.reps, setCount: sets.length };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
 }
 
 function readState(): { templates: WorkoutTemplate[]; sessions: WorkoutSession[]; exerciseHistory: ExerciseHistoryEntry[] } {
@@ -286,6 +303,7 @@ export default function App() {
   );
   const liveAddSectionRef = useRef<HTMLDivElement | null>(null);
   const appCardRef = useRef<HTMLElement | null>(null);
+  const isMountedRef = useRef(true);
   const timerPrevRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -328,37 +346,54 @@ export default function App() {
   }, [metrics]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!isSupabaseConfigured) return () => undefined;
-
-    void (async () => {
-      try {
-        const snapshot = await loadRemoteSnapshot();
-        if (cancelled) return;
-        const templates = snapshot.templates.length ? snapshot.templates : defaultTemplates;
-        setState({
-          templates,
-          sessions: snapshot.sessions,
-          exerciseHistory: buildExerciseHistoryFromSessions(snapshot.sessions)
-        });
-        setMetrics(snapshot.metrics);
-        setMuscles(snapshot.muscles);
-        setSyncMessage('Supabase connected.');
-        if (!snapshot.templates.length) {
-          void Promise.all(defaultTemplates.map((template) => saveTemplateRecord(template))).catch((error) => {
-            if (cancelled) return;
-            setSyncMessage(`Could not seed starter workouts: ${getErrorMessage(error)}`);
-          });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setSyncMessage(`Supabase sync failed: ${getErrorMessage(error)}`);
-      }
-    })();
-
+    isMountedRef.current = true;
     return () => {
-      cancelled = true;
+      isMountedRef.current = false;
     };
+  }, []);
+
+  const syncFromSupabase = async (mode: 'initial' | 'manual' = 'manual') => {
+    if (!isSupabaseConfigured) {
+      if (mode === 'manual') {
+        setSyncMessage('Add Supabase keys to sync remote data.');
+      }
+      return;
+    }
+
+    if (mode === 'manual') setSyncMessage('Syncing from Supabase...');
+
+    try {
+      const snapshot = await withTimeout(
+        loadRemoteSnapshot(),
+        SYNC_TIMEOUT_MS,
+        'Sync timed out after 10 seconds.'
+      );
+      if (!isMountedRef.current) return;
+
+      const templates = snapshot.templates.length ? snapshot.templates : defaultTemplates;
+      setState({
+        templates,
+        sessions: snapshot.sessions,
+        exerciseHistory: buildExerciseHistoryFromSessions(snapshot.sessions)
+      });
+      setMetrics(snapshot.metrics);
+      setMuscles(snapshot.muscles);
+      setSyncMessage(mode === 'manual' ? 'Synced from Supabase.' : 'Supabase connected.');
+
+      if (!snapshot.templates.length) {
+        void Promise.all(defaultTemplates.map((template) => saveTemplateRecord(template))).catch((error) => {
+          if (!isMountedRef.current) return;
+          setSyncMessage(`Could not seed starter workouts: ${getErrorMessage(error)}`);
+        });
+      }
+    } catch (error) {
+      if (!isMountedRef.current) return;
+      setSyncMessage(`Supabase sync failed: ${getErrorMessage(error)}`);
+    }
+  };
+
+  useEffect(() => {
+    void syncFromSupabase('initial');
   }, []);
 
   const recentSessions = useMemo(() => {
@@ -834,10 +869,16 @@ export default function App() {
                 <span>{syncMessage}</span>
               </p>
             </div>
-            <button className="ghost-btn topbar-stats-btn" onClick={() => setScreen('stats')}>
-              <span aria-hidden="true">◫</span>
-              <span>Stats</span>
-            </button>
+            <div className="topbar-actions">
+              <button className="ghost-btn topbar-sync-btn" onClick={() => void syncFromSupabase('manual')} disabled={!isSupabaseConfigured}>
+                <span aria-hidden="true">↻</span>
+                <span>Sync</span>
+              </button>
+              <button className="ghost-btn topbar-stats-btn" onClick={() => setScreen('stats')}>
+                <span aria-hidden="true">◫</span>
+                <span>Stats</span>
+              </button>
+            </div>
           </header>
         )}
 
