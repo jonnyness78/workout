@@ -356,6 +356,15 @@ export default function App() {
     };
   }, []);
 
+  function mergeUniqueById<T extends { id: string }>(current: T[], incoming: T[]) {
+    const merged = [...current];
+    const seen = new Set(current.map((item) => item.id));
+    for (const item of incoming) {
+      if (!seen.has(item.id)) merged.push(item);
+    }
+    return merged;
+  }
+
   const syncFromSupabase = async (mode: 'initial' | 'manual' = 'manual') => {
     if (!isSupabaseConfigured) {
       if (mode === 'manual') {
@@ -364,7 +373,7 @@ export default function App() {
       return;
     }
 
-    if (mode === 'manual') setSyncMessage('Syncing from Supabase...');
+    setSyncMessage(mode === 'manual' ? 'Syncing from Supabase...' : 'Syncing with Supabase...');
 
     try {
       const snapshot = await withTimeout(
@@ -374,15 +383,29 @@ export default function App() {
       );
       if (!isMountedRef.current) return;
 
-      const templates = snapshot.templates.length ? snapshot.templates : defaultTemplates;
-      setState({
-        templates,
-        sessions: snapshot.sessions,
-        exerciseHistory: buildExerciseHistoryFromSessions(snapshot.sessions)
+      setState((current) => {
+        const mergedSessions = mergeUniqueById(current.sessions, snapshot.sessions);
+        mergedSessions.sort((a, b) => b.date.localeCompare(a.date));
+        const mergedTemplates = mergeUniqueById(current.templates, snapshot.templates);
+        const mergedExerciseHistory = buildExerciseHistoryFromSessions(mergedSessions);
+        return {
+          templates: mergedTemplates.length ? mergedTemplates : defaultTemplates,
+          sessions: mergedSessions,
+          exerciseHistory: mergedExerciseHistory.length ? mergedExerciseHistory : current.exerciseHistory
+        };
       });
-      setMetrics(snapshot.metrics);
-      setMuscles(snapshot.muscles);
-      setSyncMessage(mode === 'manual' ? 'Synced shared Supabase data.' : 'Supabase connected.');
+
+      setMetrics((current) => {
+        const merged = mergeUniqueById(
+          current.map((entry) => ({ ...entry, id: entry.date })),
+          snapshot.metrics.map((entry) => ({ ...entry, id: entry.date }))
+        ).map(({ id: _id, ...entry }) => entry);
+        merged.sort((a, b) => b.date.localeCompare(a.date));
+        return merged;
+      });
+
+      setMuscles((current) => sortMuscleNames([...current, ...snapshot.muscles]));
+      setSyncMessage(mode === 'manual' ? 'Synced with Supabase.' : 'Supabase connected.');
 
       if (!snapshot.templates.length) {
         void Promise.all(defaultTemplates.map((template) => saveTemplateRecord(template))).catch((error) => {
@@ -392,7 +415,7 @@ export default function App() {
       }
     } catch (error) {
       if (!isMountedRef.current) return;
-      setSyncMessage(`Supabase sync failed: ${getErrorMessage(error)}`);
+      setSyncMessage(`Supabase sync failed. Using local data: ${getErrorMessage(error)}`);
     }
   };
 
